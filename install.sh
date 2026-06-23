@@ -10,7 +10,8 @@
 #   - Ask for the domain and (optionally) issue a free Let's Encrypt SSL
 #     certificate, OR skip SSL when the domain sits behind a CDN
 #     (e.g. ArvanCloud / Iranian hosts / Cloudflare).
-#   - Install PHP 8.1 (php-fpm + extensions)
+#   - Install PHP (php-fpm + extensions); prefers 8.3, falls back to 8.2/8.1
+#     and adapts the rest of the install to whatever version is present
 #   - Install MariaDB and auto-create a random database, user and password
 #   - Download & install the correct ionCube Loader and wire it into php.ini
 #   - Tune php.ini  (upload 50M, memory_limit 1024M)
@@ -27,7 +28,16 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Constants & globals
 # ---------------------------------------------------------------------------
-readonly PHP_VERSION="8.1"
+# PHP versions to try, in order of preference. Capped at 8.3 on purpose:
+# newer than 8.3 isn't always covered by an ionCube loader yet, and 8.0/older
+# are end-of-life. The first version that installs cleanly wins, and the rest
+# of the script adapts to whatever actually got installed.
+readonly PHP_CANDIDATES=(8.3 8.2 8.1)
+# When the running Ubuntu is too new for the ondrej PPA (no Release file yet),
+# the PPA is pinned to this well-supported LTS codename so PHP is installable.
+readonly PHP_PPA_FALLBACK_CODENAME="noble"
+PHP_VERSION=""   # resolved at runtime by install_php()
+
 readonly CRED_FILE="/root/wordpress-credentials.txt"
 readonly IONCUBE_BASE_URL="https://downloads.ioncube.com/loader_downloads"
 
@@ -211,16 +221,67 @@ install_nginx() {
   ok "Nginx installed and running."
 }
 
+# Add the ondrej/php PPA and make sure its package index is usable. On very
+# new Ubuntu releases the PPA has no Release file yet, so we pin it to a
+# supported LTS codename instead of letting `apt-get update` fail the run.
+setup_php_repo() {
+  local codename ppa_file
+  codename="$(. /etc/os-release && echo "${VERSION_CODENAME:-}")"
+
+  log "Adding the ondrej/php PPA (multiple PHP versions) ..."
+  add-apt-repository -y ppa:ondrej/php >/dev/null 2>&1 || true
+
+  if apt-get update -y >/dev/null 2>&1; then
+    ok "Package lists updated."
+    return 0
+  fi
+
+  # The update failed — most likely the PPA has nothing for this codename.
+  ppa_file="$(grep -rls 'ondrej' /etc/apt/sources.list.d/ 2>/dev/null | head -n1 || true)"
+  if [[ -n "${ppa_file}" && -n "${codename}" && "${codename}" != "${PHP_PPA_FALLBACK_CODENAME}" ]]; then
+    warn "ondrej PPA has no packages for '${codename}'; pinning to '${PHP_PPA_FALLBACK_CODENAME}'."
+    sed -i "s/\b${codename}\b/${PHP_PPA_FALLBACK_CODENAME}/g" "${ppa_file}"
+  fi
+  apt-get update -y >/dev/null 2>&1 || true
+}
+
 install_php() {
-  step "4/9  Installing PHP ${PHP_VERSION} / نصب PHP ${PHP_VERSION}"
-  add-apt-repository -y ppa:ondrej/php
-  apt-get update -y
-  apt-get install -y \
-    "php${PHP_VERSION}-fpm" "php${PHP_VERSION}-cli" "php${PHP_VERSION}-common" \
-    "php${PHP_VERSION}-mysql" "php${PHP_VERSION}-curl" "php${PHP_VERSION}-gd" \
-    "php${PHP_VERSION}-mbstring" "php${PHP_VERSION}-xml" "php${PHP_VERSION}-zip" \
-    "php${PHP_VERSION}-intl" "php${PHP_VERSION}-bcmath" "php${PHP_VERSION}-soap" \
-    "php${PHP_VERSION}-imagick" "php${PHP_VERSION}-opcache"
+  step "4/9  Installing PHP (max 8.3) / نصب PHP (حداکثر ۸٫۳)"
+  setup_php_repo
+
+  # Try each candidate version until the core packages install cleanly.
+  local v core_ok=""
+  for v in "${PHP_CANDIDATES[@]}"; do
+    log "Trying PHP ${v} ..."
+    if apt-get install -y \
+        "php${v}-fpm" "php${v}-cli" "php${v}-common" "php${v}-mysql"; then
+      PHP_VERSION="${v}"
+      core_ok="yes"
+      break
+    fi
+    warn "PHP ${v} is not installable here; trying the next version."
+  done
+
+  if [[ -z "${core_ok}" ]]; then
+    err "Could not install PHP 8.1/8.2/8.3 on this system."
+    err "On brand-new Ubuntu releases the ondrej PPA may not be ready yet."
+    err "Please use Ubuntu 24.04 LTS (or 22.04), then re-run."
+    err "لطفاً روی Ubuntu 24.04 LTS (یا 22.04) اجرا کنید."
+    exit 1
+  fi
+
+  # Detect the version actually provided by the php<ver> binary, just in case.
+  PHP_VERSION="$("php${PHP_VERSION}" -r 'echo PHP_MAJOR_VERSION.".".PHP_MINOR_VERSION;')"
+  ok "PHP ${PHP_VERSION} core installed."
+
+  # Extensions are best-effort: a single unavailable package on a pinned repo
+  # must not abort the whole installation.
+  local ext
+  for ext in curl gd mbstring xml zip intl bcmath soap imagick opcache; do
+    apt-get install -y "php${PHP_VERSION}-${ext}" \
+      || warn "Optional extension php${PHP_VERSION}-${ext} was not installed."
+  done
+
   systemctl enable --now "php${PHP_VERSION}-fpm"
   ok "PHP ${PHP_VERSION} installed."
 }

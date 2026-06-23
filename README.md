@@ -1,7 +1,7 @@
 # One-Click WordPress Install
 
 A single command that turns a fresh **Ubuntu** server into a ready-to-use
-WordPress host: system update, Nginx, PHP 8.1, MariaDB, ionCube Loader,
+WordPress host: system update, Nginx, PHP 8.3, MariaDB, ionCube Loader,
 tuned `php.ini`, optional Let's Encrypt SSL, and the WordPress files — all
 automated, with a random database/user/password generated for you.
 
@@ -18,7 +18,8 @@ automated, with a random database/user/password generated for you.
 - 🔐 Issues a free **Let's Encrypt SSL** certificate — or **skips SSL** when
   the domain is behind a **CDN** (ArvanCloud / Iranian hosts / Cloudflare),
   where the CDN already handles HTTPS
-- 🐘 Installs **PHP 8.1** (php-fpm + all common WordPress extensions)
+- 🐘 Installs **PHP** (php-fpm + all common WordPress extensions) — prefers
+  **8.3**, auto-detected, and falls back to 8.2 / 8.1 if needed
 - 🗄️ Installs **MariaDB** (lighter, faster and secure-by-default on Ubuntu)
   and auto-creates a **random** database, user and password
 - 🧩 Downloads the matching **ionCube Loader**, installs it into the correct
@@ -108,9 +109,9 @@ The same credentials are also saved, readable by **root only**, at:
 | Component | Choice / Notes |
 | --- | --- |
 | Web server | Nginx |
-| PHP | 8.1 (php-fpm) with `mysql, curl, gd, mbstring, xml, zip, intl, bcmath, soap, imagick, opcache` |
+| PHP | 8.3 by default — auto-detected, falls back to 8.2/8.1 — (php-fpm) with `mysql, curl, gd, mbstring, xml, zip, intl, bcmath, soap, imagick, opcache` |
 | Database | **MariaDB** — chosen over MySQL for being lighter/faster on Ubuntu and using secure `unix_socket` auth for root (no root password is ever stored) |
-| Encoder | ionCube Loader (auto-matched to PHP 8.1 and CPU architecture) |
+| Encoder | ionCube Loader (auto-matched to the installed PHP version and CPU architecture) |
 | SSL | Let's Encrypt via Certbot (optional) |
 | Web root | `/var/www/<your-domain>` |
 
@@ -158,7 +159,7 @@ services and is intended for new VPS/cloud instances.
 # نصب یک‌کلیکی وردپرس
 
 با **یک خط دستور**، یک سرور تازه‌ی **Ubuntu** را به یک میزبان آماده‌ی وردپرس
-تبدیل می‌کند: بروزرسانی سیستم، نصب Nginx، PHP 8.1، MariaDB، ionCube، تنظیم
+تبدیل می‌کند: بروزرسانی سیستم، نصب Nginx، PHP 8.3، MariaDB، ionCube، تنظیم
 `php.ini`، گواهی SSL رایگان (اختیاری) و دانلود وردپرس — همه به‌صورت خودکار،
 به‌همراه ساخت دیتابیس و یوزر و رمز **تصادفی**.
 
@@ -171,7 +172,8 @@ services and is intended for new VPS/cloud instances.
 - 🔐 گرفتن گواهی **SSL رایگان (Let's Encrypt)** — یا **رد کردن SSL** وقتی دامنه
   پشت **CDN** است (آروان‌کلود / هاست‌های ایران / کلودفلر) که خودِ CDN کار
   HTTPS را انجام می‌دهد
-- 🐘 نصب **PHP 8.1** (php-fpm به‌همراه همه‌ی افزونه‌های لازم وردپرس)
+- 🐘 نصب **PHP** (php-fpm به‌همراه همه‌ی افزونه‌های لازم وردپرس) — ترجیحاً
+  نسخه‌ی **۸٫۳**، با تشخیص خودکار، و در صورت نیاز بازگشت به ۸٫۲ / ۸٫۱
 - 🗄️ نصب **MariaDB** (روی Ubuntu سبک‌تر، سریع‌تر و به‌صورت پیش‌فرض امن‌تر) و
   ساخت خودکار دیتابیس و یوزر و رمز **تصادفی**
 - 🧩 دانلود **ionCube** مناسب، نصب در مسیر درست و افزودن آن به `php.ini`
@@ -250,9 +252,9 @@ bash <(wget -qO- https://raw.githubusercontent.com/ehsanking/One-Click-WordPress
 | جزء | توضیح |
 | --- | --- |
 | وب‌سرور | Nginx |
-| PHP | نسخه‌ی 8.1 (php-fpm) با افزونه‌های `mysql, curl, gd, mbstring, xml, zip, intl, bcmath, soap, imagick, opcache` |
+| PHP | پیش‌فرض ۸٫۳ — با تشخیص خودکار، بازگشت به ۸٫۲/۸٫۱ — (php-fpm) با افزونه‌های `mysql, curl, gd, mbstring, xml, zip, intl, bcmath, soap, imagick, opcache` |
 | دیتابیس | **MariaDB** — به‌جای MySQL، چون روی Ubuntu سبک‌تر/سریع‌تر است و برای root از احراز هویت امن `unix_socket` استفاده می‌کند (هیچ رمز root ذخیره نمی‌شود) |
-| انکودر | ionCube (به‌صورت خودکار برای PHP 8.1 و معماری پردازنده انتخاب می‌شود) |
+| انکودر | ionCube (به‌صورت خودکار برای نسخه‌ی نصب‌شده‌ی PHP و معماری پردازنده انتخاب می‌شود) |
 | SSL | Let's Encrypt با Certbot (اختیاری) |
 | مسیر سایت | `/var/www/<دامنه‌ی شما>` |
 
