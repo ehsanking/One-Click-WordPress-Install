@@ -108,6 +108,12 @@ ask_yn() {
 # Using process substitution avoids SIGPIPE tripping `set -o pipefail`.
 gen() { head -c "$2" <(LC_ALL=C tr -dc "$1" </dev/urandom); }
 
+# Path to the active (non-disabled) ondrej PPA source file, if any.
+ondrej_source_file() {
+  grep -rls 'ondrej' /etc/apt/sources.list.d/ 2>/dev/null \
+    | grep -v '\.disabled$' | head -n1 || true
+}
+
 require_root() {
   if [[ "${EUID}" -ne 0 ]]; then
     err "This script must be run as root (use sudo)."
@@ -180,8 +186,21 @@ update_system() {
   step "1/9  Updating & upgrading the system / بروزرسانی سیستم"
   export DEBIAN_FRONTEND=noninteractive
   export NEEDRESTART_MODE=a
-  apt-get update -y
-  apt-get upgrade -y
+
+  if ! apt-get update -y; then
+    warn "An apt repository failed to refresh (often a stale third-party PPA)."
+    # A broken ondrej PPA left over from a previous run breaks every apt call.
+    # Disable it here; the PHP step re-adds and pins it correctly.
+    local stale
+    stale="$(ondrej_source_file)"
+    if [[ -n "${stale}" ]]; then
+      warn "Disabling stale ondrej PPA: ${stale}"
+      mv "${stale}" "${stale}.disabled" 2>/dev/null || true
+    fi
+    apt-get update -y || warn "Continuing with cached package lists."
+  fi
+
+  apt-get upgrade -y || warn "Upgrade reported issues; continuing."
   ok "System updated."
 }
 
@@ -237,7 +256,7 @@ setup_php_repo() {
   fi
 
   # The update failed — most likely the PPA has nothing for this codename.
-  ppa_file="$(grep -rls 'ondrej' /etc/apt/sources.list.d/ 2>/dev/null | head -n1 || true)"
+  ppa_file="$(ondrej_source_file)"
   if [[ -n "${ppa_file}" && -n "${codename}" && "${codename}" != "${PHP_PPA_FALLBACK_CODENAME}" ]]; then
     warn "ondrej PPA has no packages for '${codename}'; pinning to '${PHP_PPA_FALLBACK_CODENAME}'."
     sed -i "s/\b${codename}\b/${PHP_PPA_FALLBACK_CODENAME}/g" "${ppa_file}"
@@ -272,7 +291,7 @@ install_php() {
 
     # Drop the (possibly pinned) ondrej PPA so we cleanly use the OS packages.
     local ondrej_src
-    ondrej_src="$(grep -rls 'ondrej' /etc/apt/sources.list.d/ 2>/dev/null | head -n1 || true)"
+    ondrej_src="$(ondrej_source_file)"
     if [[ -n "${ondrej_src}" ]]; then
       mv "${ondrej_src}" "${ondrej_src}.disabled" 2>/dev/null || true
       apt-get update -y >/dev/null 2>&1 || true
