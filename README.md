@@ -93,6 +93,16 @@ The same credentials are also saved, readable by **root only**, at:
 
 ---
 
+## 📚 Guides
+
+- **[Installing WordPress — step by step](docs/INSTALL-WORDPRESS.md)** — how to
+  finish the browser-based web installer, plus useful WP-CLI commands and
+  troubleshooting.
+- **[Security guide](docs/SECURITY.md)** — server and WordPress hardening:
+  SSH, firewall, Fail2ban, 2FA, backups, CDN tips and a quick checklist.
+
+---
+
 ## 🧩 The stack it installs
 
 | Component | Choice / Notes |
@@ -227,6 +237,13 @@ bash <(wget -qO- https://raw.githubusercontent.com/ehsanking/One-Click-WordPress
 ```
 /root/wordpress-credentials.txt
 ```
+
+## 📚 راهنماها
+
+- **[نصب وردپرس — مرحله‌به‌مرحله](docs/INSTALL-WORDPRESS.md)** — تکمیل نصب
+  وردپرس در مرورگر، به‌همراه دستورهای مفید WP-CLI و رفع اشکال.
+- **[راهنمای امنیت](docs/SECURITY.md)** — سخت‌سازی سرور و وردپرس: SSH،
+  فایروال، Fail2ban، احراز هویت دومرحله‌ای، پشتیبان‌گیری، نکات CDN و چک‌لیست.
 
 ## 🧩 اجزای نصب‌شده
 
