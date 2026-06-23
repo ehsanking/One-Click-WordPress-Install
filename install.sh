@@ -262,8 +262,43 @@ install_php() {
     warn "PHP ${v} is not installable here; trying the next version."
   done
 
+  # Last resort: no preferred (<=8.3) version is packaged for this OS — e.g. a
+  # brand-new Ubuntu the ondrej PPA hasn't caught up with. Offer the PHP the
+  # distribution ships natively. ionCube supports up to PHP 8.4, so this still
+  # produces a working, encoder-compatible stack. We ask first so we never
+  # silently exceed the 8.3 preference.
   if [[ -z "${core_ok}" ]]; then
-    err "Could not install PHP 8.1/8.2/8.3 on this system."
+    warn "PHP 8.1/8.2/8.3 are not available from the ondrej PPA on this OS."
+
+    # Drop the (possibly pinned) ondrej PPA so we cleanly use the OS packages.
+    local ondrej_src
+    ondrej_src="$(grep -rls 'ondrej' /etc/apt/sources.list.d/ 2>/dev/null | head -n1 || true)"
+    if [[ -n "${ondrej_src}" ]]; then
+      mv "${ondrej_src}" "${ondrej_src}.disabled" 2>/dev/null || true
+      apt-get update -y >/dev/null 2>&1 || true
+    fi
+
+    local native_pkg native_ver
+    native_pkg="$(apt-cache depends php-fpm 2>/dev/null \
+      | grep -oE 'php[0-9]+\.[0-9]+-fpm' | head -n1 || true)"
+    native_ver="${native_pkg#php}"; native_ver="${native_ver%-fpm}"
+
+    if [[ -n "${native_ver}" ]]; then
+      log "This system ships PHP ${native_ver} natively (ionCube supports up to 8.4)."
+      log "این سیستم به‌صورت پیش‌فرض PHP ${native_ver} دارد (ionCube تا ۸٫۴ پشتیبانی می‌کند)."
+      if ask_yn "Install native PHP ${native_ver} instead? / همان نسخه‌ی پیش‌فرض نصب شود؟" "y"; then
+        if apt-get install -y \
+            "php${native_ver}-fpm" "php${native_ver}-cli" \
+            "php${native_ver}-common" "php${native_ver}-mysql"; then
+          PHP_VERSION="${native_ver}"
+          core_ok="yes"
+        fi
+      fi
+    fi
+  fi
+
+  if [[ -z "${core_ok}" ]]; then
+    err "Could not install a usable PHP version on this system."
     err "On brand-new Ubuntu releases the ondrej PPA may not be ready yet."
     err "Please use Ubuntu 24.04 LTS (or 22.04), then re-run."
     err "لطفاً روی Ubuntu 24.04 LTS (یا 22.04) اجرا کنید."

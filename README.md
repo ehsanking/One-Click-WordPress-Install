@@ -19,7 +19,9 @@ automated, with a random database/user/password generated for you.
   the domain is behind a **CDN** (ArvanCloud / Iranian hosts / Cloudflare),
   where the CDN already handles HTTPS
 - 🐘 Installs **PHP** (php-fpm + all common WordPress extensions) — prefers
-  **8.3**, auto-detected, and falls back to 8.2 / 8.1 if needed
+  **8.3**, auto-detected, falls back to 8.2 / 8.1; and on a brand-new Ubuntu
+  where those aren't packaged yet (e.g. 26.04), it asks before using the
+  OS-native PHP (such as 8.4, which ionCube also supports)
 - 🗄️ Installs **MariaDB** (lighter, faster and secure-by-default on Ubuntu)
   and auto-creates a **random** database, user and password
 - 🧩 Downloads the matching **ionCube Loader**, installs it into the correct
@@ -173,7 +175,9 @@ services and is intended for new VPS/cloud instances.
   پشت **CDN** است (آروان‌کلود / هاست‌های ایران / کلودفلر) که خودِ CDN کار
   HTTPS را انجام می‌دهد
 - 🐘 نصب **PHP** (php-fpm به‌همراه همه‌ی افزونه‌های لازم وردپرس) — ترجیحاً
-  نسخه‌ی **۸٫۳**، با تشخیص خودکار، و در صورت نیاز بازگشت به ۸٫۲ / ۸٫۱
+  نسخه‌ی **۸٫۳**، با تشخیص خودکار، و در صورت نیاز بازگشت به ۸٫۲ / ۸٫۱؛ و روی
+  اوبونتوی خیلی‌جدید که این نسخه‌ها هنوز بسته ندارند (مثل ۲۶.۰۴)، قبل از استفاده
+  از PHP پیش‌فرض سیستم (مثل ۸٫۴ که ionCube هم پشتیبانی می‌کند) از شما می‌پرسد
 - 🗄️ نصب **MariaDB** (روی Ubuntu سبک‌تر، سریع‌تر و به‌صورت پیش‌فرض امن‌تر) و
   ساخت خودکار دیتابیس و یوزر و رمز **تصادفی**
 - 🧩 دانلود **ionCube** مناسب، نصب در مسیر درست و افزودن آن به `php.ini`
