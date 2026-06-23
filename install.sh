@@ -21,7 +21,10 @@
 # Usage (one line):
 #   bash <(curl -fsSL https://raw.githubusercontent.com/ehsanking/One-Click-WordPress-Install/main/install.sh)
 #
-# Tested on Ubuntu 20.04 / 22.04 / 24.04.
+# Supported on Ubuntu 20.04 / 22.04 / 24.04 LTS.
+# NOTE: Ubuntu 25.10 / 26.04+ ship PHP 8.5, which the ionCube Loader does not
+# support yet (ionCube currently supports PHP up to 8.4). For ionCube-encoded
+# software, use Ubuntu 24.04 LTS.
 
 set -euo pipefail
 
@@ -303,9 +306,19 @@ install_php() {
     native_ver="${native_pkg#php}"; native_ver="${native_ver%-fpm}"
 
     if [[ -n "${native_ver}" ]]; then
-      log "This system ships PHP ${native_ver} natively (ionCube supports up to 8.4)."
-      log "این سیستم به‌صورت پیش‌فرض PHP ${native_ver} دارد (ionCube تا ۸٫۴ پشتیبانی می‌کند)."
-      if ask_yn "Install native PHP ${native_ver} instead? / همان نسخه‌ی پیش‌فرض نصب شود؟" "y"; then
+      # ionCube currently ships loaders only up to PHP 8.4. If the OS-native PHP
+      # is newer (e.g. 8.5 on Ubuntu 26.04) warn loudly and default to "no",
+      # because ionCube-encoded software would not run.
+      local default_ans="y"
+      if [[ "$(printf '%s\n8.4\n' "${native_ver}" | sort -V | tail -n1)" != "8.4" ]]; then
+        warn "ionCube has no loader for PHP ${native_ver} yet — ionCube would be skipped."
+        warn "ionCube برای PHP ${native_ver} هنوز لودر ندارد — ionCube نصب نخواهد شد."
+        warn "For ionCube-encoded software, use Ubuntu 24.04 LTS instead."
+        default_ans="n"
+      fi
+      log "This system ships PHP ${native_ver} natively."
+      log "این سیستم به‌صورت پیش‌فرض PHP ${native_ver} دارد."
+      if ask_yn "Install native PHP ${native_ver} anyway? / با این حال نصب شود؟" "${default_ans}"; then
         if apt-get install -y \
             "php${native_ver}-fpm" "php${native_ver}-cli" \
             "php${native_ver}-common" "php${native_ver}-mysql"; then
@@ -317,9 +330,10 @@ install_php() {
   fi
 
   if [[ -z "${core_ok}" ]]; then
-    err "Could not install a usable PHP version on this system."
-    err "On brand-new Ubuntu releases the ondrej PPA may not be ready yet."
+    err "No ionCube-compatible PHP (<= 8.4) could be installed on this system."
+    err "Ubuntu 25.10 / 26.04+ ship PHP 8.5, which ionCube does not support yet."
     err "Please use Ubuntu 24.04 LTS (or 22.04), then re-run."
+    err "اوبونتو ۲۶.۰۴ نسخه‌ی PHP 8.5 دارد که ionCube هنوز پشتیبانی نمی‌کند."
     err "لطفاً روی Ubuntu 24.04 LTS (یا 22.04) اجرا کنید."
     exit 1
   fi

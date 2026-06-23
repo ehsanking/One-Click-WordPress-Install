@@ -7,6 +7,13 @@ automated, with a random database/user/password generated for you.
 
 > **English** documentation is below. مستندات **فارسی** در پایین همین صفحه آمده است. ⬇️
 
+> ### ⚠️ Supported up to Ubuntu 24.04 LTS
+> This installer is supported on **Ubuntu 20.04 / 22.04 / 24.04 LTS**.
+> **Ubuntu 25.10 / 26.04 and newer are not supported yet**, because they ship
+> **PHP 8.5**, while the **ionCube Loader currently supports PHP only up to
+> 8.4**. If you need ionCube (for ionCube-encoded software), install on
+> **Ubuntu 24.04 LTS**, where the script sets up PHP 8.3 + ionCube cleanly.
+
 ---
 
 ## ✨ Features
@@ -19,9 +26,9 @@ automated, with a random database/user/password generated for you.
   the domain is behind a **CDN** (ArvanCloud / Iranian hosts / Cloudflare),
   where the CDN already handles HTTPS
 - 🐘 Installs **PHP** (php-fpm + all common WordPress extensions) — prefers
-  **8.3**, auto-detected, falls back to 8.2 / 8.1; and on a brand-new Ubuntu
-  where those aren't packaged yet (e.g. 26.04), it asks before using the
-  OS-native PHP (such as 8.4, which ionCube also supports)
+  **8.3**, auto-detected, falls back to 8.2 / 8.1. (On Ubuntu 26.04+ the only
+  available PHP is 8.5, which ionCube can't load yet — see the compatibility
+  note above.)
 - 🗄️ Installs **MariaDB** (lighter, faster and secure-by-default on Ubuntu)
   and auto-creates a **random** database, user and password
 - 🧩 Downloads the matching **ionCube Loader**, installs it into the correct
@@ -36,10 +43,21 @@ automated, with a random database/user/password generated for you.
 
 ## ✅ Requirements
 
-- A fresh **Ubuntu** server — tested on **20.04 / 22.04 / 24.04**
+- A fresh **Ubuntu LTS** server — **20.04 / 22.04 / 24.04** (use **24.04 LTS**
+  for the newest stack with ionCube). ⚠️ **25.10 / 26.04+ are not supported**
+  yet: they ship PHP 8.5 and ionCube only supports up to PHP 8.4.
 - `root` access (or `sudo`)
 - A **domain** whose DNS already points to the server's IP
   (required only if you want Let's Encrypt SSL)
+
+### Why up to Ubuntu 24.04?
+
+The stack depends on the **ionCube Loader**, which currently provides loaders
+for **PHP up to 8.4**. Ubuntu **24.04 LTS** ships PHP 8.3 (and the ondrej PPA
+offers 8.4), so ionCube works. Ubuntu **26.04** ships **PHP 8.5**, for which no
+ionCube loader exists yet — so the installer will warn and stop rather than
+give you a broken, ionCube-less setup. Stick with **24.04 LTS** until ionCube
+adds PHP 8.5 support.
 
 ---
 
@@ -165,6 +183,13 @@ services and is intended for new VPS/cloud instances.
 `php.ini`، گواهی SSL رایگان (اختیاری) و دانلود وردپرس — همه به‌صورت خودکار،
 به‌همراه ساخت دیتابیس و یوزر و رمز **تصادفی**.
 
+> ### ⚠️ پشتیبانی تا Ubuntu 24.04 LTS
+> این نصب‌کننده روی **Ubuntu 20.04 / 22.04 / 24.04 LTS** پشتیبانی می‌شود.
+> **Ubuntu 25.10 / 26.04 و بالاتر هنوز پشتیبانی نمی‌شوند**، چون نسخه‌ی PHP آن‌ها
+> **8.5** است، در حالی که **ionCube فعلاً فقط تا PHP 8.4** را پشتیبانی می‌کند.
+> اگر به ionCube نیاز دارید (برای نرم‌افزارهای کدشده با ionCube)، روی
+> **Ubuntu 24.04 LTS** نصب کنید که اسکریپت PHP 8.3 + ionCube را تمیز برپا می‌کند.
+
 ## ✨ امکانات
 
 - 🔄 بروزرسانی و ارتقای کامل سیستم Ubuntu
@@ -175,9 +200,9 @@ services and is intended for new VPS/cloud instances.
   پشت **CDN** است (آروان‌کلود / هاست‌های ایران / کلودفلر) که خودِ CDN کار
   HTTPS را انجام می‌دهد
 - 🐘 نصب **PHP** (php-fpm به‌همراه همه‌ی افزونه‌های لازم وردپرس) — ترجیحاً
-  نسخه‌ی **۸٫۳**، با تشخیص خودکار، و در صورت نیاز بازگشت به ۸٫۲ / ۸٫۱؛ و روی
-  اوبونتوی خیلی‌جدید که این نسخه‌ها هنوز بسته ندارند (مثل ۲۶.۰۴)، قبل از استفاده
-  از PHP پیش‌فرض سیستم (مثل ۸٫۴ که ionCube هم پشتیبانی می‌کند) از شما می‌پرسد
+  نسخه‌ی **۸٫۳**، با تشخیص خودکار، و در صورت نیاز بازگشت به ۸٫۲ / ۸٫۱. (روی
+  Ubuntu 26.04 تنها نسخه‌ی موجود ۸٫۵ است که ionCube هنوز نمی‌تواند آن را
+  بارگذاری کند — به یادداشت سازگاری بالا مراجعه کنید.)
 - 🗄️ نصب **MariaDB** (روی Ubuntu سبک‌تر، سریع‌تر و به‌صورت پیش‌فرض امن‌تر) و
   ساخت خودکار دیتابیس و یوزر و رمز **تصادفی**
 - 🧩 دانلود **ionCube** مناسب، نصب در مسیر درست و افزودن آن به `php.ini`
@@ -190,10 +215,21 @@ services and is intended for new VPS/cloud instances.
 
 ## ✅ پیش‌نیازها
 
-- یک سرور **Ubuntu** تازه — تست‌شده روی **۲۰.۰۴ / ۲۲.۰۴ / ۲۴.۰۴**
+- یک سرور **Ubuntu LTS** تازه — **۲۰.۰۴ / ۲۲.۰۴ / ۲۴.۰۴** (برای جدیدترین استک
+  همراه ionCube از **۲۴.۰۴ LTS** استفاده کنید). ⚠️ **۲۵.۱۰ / ۲۶.۰۴ و بالاتر هنوز
+  پشتیبانی نمی‌شوند**: نسخه‌ی PHP آن‌ها ۸٫۵ است و ionCube فقط تا ۸٫۴ را پشتیبانی می‌کند.
 - دسترسی `root` (یا `sudo`)
 - یک **دامنه** که DNS آن از قبل به آی‌پی سرور اشاره کند
   (فقط اگر SSL از Let's Encrypt می‌خواهید لازم است)
+
+### چرا تا Ubuntu 24.04؟
+
+این استک به **ionCube Loader** وابسته است که فعلاً لودر را برای **PHP تا 8.4**
+ارائه می‌دهد. **Ubuntu 24.04 LTS** نسخه‌ی PHP 8.3 دارد (و مخزن ondrej نسخه‌ی 8.4
+را می‌دهد)، پس ionCube کار می‌کند. اما **Ubuntu 26.04** نسخه‌ی **PHP 8.5** دارد که
+هنوز هیچ لودر ionCube برایش وجود ندارد — برای همین اسکریپت به‌جای راه‌اندازی یک
+نصبِ معیوبِ بدون ionCube، هشدار می‌دهد و متوقف می‌شود. تا وقتی ionCube از PHP 8.5
+پشتیبانی کند، روی **24.04 LTS** بمانید.
 
 ## 🚀 نصب (یک خط)
 
