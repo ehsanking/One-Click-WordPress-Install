@@ -14,7 +14,7 @@
 #     and adapts the rest of the install to whatever version is present
 #   - Install MariaDB and auto-create a random database, user and password
 #   - Download & install the correct ionCube Loader and wire it into php.ini
-#   - Tune php.ini  (upload 50M, memory_limit 1024M)
+#   - Tune php.ini  (upload 100M, memory_limit 1024M)
 #   - Download WordPress so the user can finish the famous web installer
 #     (picking the language) using the database credentials we print.
 #
@@ -235,11 +235,7 @@ install_nginx() {
   step "3/9  Installing Nginx / نصب Nginx"
   apt-get install -y nginx
   systemctl enable --now nginx
-  # Basic firewall (won't lock anyone out: SSH stays open).
-  if command -v ufw >/dev/null; then
-    ufw allow OpenSSH >/dev/null 2>&1 || true
-    ufw allow 'Nginx Full' >/dev/null 2>&1 || true
-  fi
+  # The firewall is configured and enabled later, in harden_system().
   ok "Nginx installed and running."
 }
 
@@ -425,14 +421,14 @@ install_ioncube() {
 }
 
 tune_php() {
-  step "7/9  Tuning php.ini (50M uploads, 1GB memory) / تنظیم php.ini"
+  step "7/9  Tuning php.ini (100M uploads, 1GB memory) / تنظیم php.ini"
   local sapi ini_dir
   for sapi in fpm cli; do
     ini_dir="/etc/php/${PHP_VERSION}/${sapi}/conf.d"
     cat > "${ini_dir}/99-wordpress.ini" <<-INI
 		; One-Click WordPress Install tuning
-		upload_max_filesize = 50M
-		post_max_size = 51M
+		upload_max_filesize = 100M
+		post_max_size = 128M
 		memory_limit = 1024M
 		max_execution_time = 300
 		max_input_time = 300
@@ -442,7 +438,7 @@ tune_php() {
 	INI
   done
   systemctl restart "php${PHP_VERSION}-fpm"
-  ok "php.ini tuned (upload 50M, memory_limit 1024M)."
+  ok "php.ini tuned (upload 100M, memory_limit 1024M)."
 }
 
 download_wordpress() {
@@ -481,7 +477,14 @@ configure_nginx_site() {
 	    root ${WEBROOT};
 	    index index.php index.html index.htm;
 
-	    client_max_body_size 50M;
+	    client_max_body_size 128M;
+
+	    # --- Security hardening ---
+	    # Never serve wp-config.php or hidden files (except ACME challenges).
+	    location = /wp-config.php { deny all; }
+	    location ~* /\.(?!well-known).* { deny all; }
+	    # Block PHP execution inside the uploads directory (common attack path).
+	    location ~* /wp-content/uploads/.*\.php\$ { deny all; }
 
 	    location / {
 	        try_files \$uri \$uri/ /index.php?\$args;
@@ -492,7 +495,6 @@ configure_nginx_site() {
 	        fastcgi_pass unix:/run/php/php${PHP_VERSION}-fpm.sock;
 	    }
 
-	    location ~* /\.(?!well-known).* { deny all; }
 	    location = /favicon.ico { log_not_found off; access_log off; }
 	    location = /robots.txt  { allow all; log_not_found off; access_log off; }
 	    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|webp|woff2?)\$ {
@@ -524,6 +526,53 @@ configure_nginx_site() {
   fi
 }
 
+harden_system() {
+  step "Security hardening / سخت‌سازی امنیتی"
+
+  # --- Firewall (UFW) ---------------------------------------------------
+  # Detect the SSH port from the active session (falls back to sshd_config,
+  # then 22) and allow it BEFORE enabling the firewall, so we never lock the
+  # administrator out.
+  local ssh_port=""
+  [[ -n "${SSH_CONNECTION:-}" ]] && ssh_port="$(awk '{print $NF}' <<<"${SSH_CONNECTION}")"
+  if [[ -z "${ssh_port}" ]]; then
+    ssh_port="$(grep -oiE '^[[:space:]]*Port[[:space:]]+[0-9]+' /etc/ssh/sshd_config 2>/dev/null \
+      | grep -oE '[0-9]+' | head -n1)"
+  fi
+  [[ -z "${ssh_port}" ]] && ssh_port=22
+
+  if command -v ufw >/dev/null 2>&1; then
+    ufw allow "${ssh_port}/tcp" >/dev/null 2>&1 || true
+    ufw allow OpenSSH        >/dev/null 2>&1 || true
+    ufw allow 'Nginx Full'   >/dev/null 2>&1 || true
+    ufw --force enable       >/dev/null 2>&1 || true
+    ok "Firewall enabled (SSH port ${ssh_port} + HTTP/HTTPS allowed)."
+  else
+    warn "ufw not available; firewall not enabled."
+  fi
+
+  # --- Fail2ban (SSH brute-force protection) ----------------------------
+  if apt-get install -y fail2ban >/dev/null 2>&1; then
+    printf '[sshd]\nenabled = true\n' > /etc/fail2ban/jail.local
+    systemctl enable --now fail2ban >/dev/null 2>&1 || true
+    ok "Fail2ban active (SSH brute-force protection)."
+  else
+    warn "Fail2ban could not be installed; skipping."
+  fi
+
+  # --- Automatic security updates ---------------------------------------
+  if apt-get install -y unattended-upgrades >/dev/null 2>&1; then
+    cat > /etc/apt/apt.conf.d/20auto-upgrades <<-EOF
+		APT::Periodic::Update-Package-Lists "1";
+		APT::Periodic::Unattended-Upgrade "1";
+	EOF
+    systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
+    ok "Automatic security updates enabled."
+  else
+    warn "unattended-upgrades could not be installed; skipping."
+  fi
+}
+
 save_credentials() {
   local scheme="http"
   [[ "${INSTALL_SSL}" == "yes" ]] && scheme="https"
@@ -531,16 +580,18 @@ save_credentials() {
   umask 077
   cat > "${CRED_FILE}" <<-EOF
 		==================== WordPress Install ====================
-		Date          : $(date)
-		Site URL      : ${scheme}://${DOMAIN}
-		Web root      : ${WEBROOT}
+		Date            : $(date)
+		Site URL        : ${scheme}://${DOMAIN}
+		Install page    : ${scheme}://${DOMAIN}/wp-admin/install.php
+		Admin panel     : ${scheme}://${DOMAIN}/wp-admin
+		Web root        : ${WEBROOT}
 
 		--- Database (enter these in the WordPress web installer) ---
-		Database name : ${DB_NAME}
-		Username      : ${DB_USER}
-		Password      : ${DB_PASS}
-		Database host : localhost
-		Table prefix  : wp_
+		Database name   : ${DB_NAME}
+		Username        : ${DB_USER}
+		Password        : ${DB_PASS}
+		Database host   : localhost
+		Table prefix    : wp_
 		===========================================================
 	EOF
   chmod 600 "${CRED_FILE}"
@@ -550,13 +601,19 @@ print_summary() {
   local scheme="http"
   [[ "${INSTALL_SSL}" == "yes" ]] && scheme="https"
 
+  local url="${scheme}://${DOMAIN}"
+
   printf '\n%s\n' "${C_GREEN}=================================================================${C_RESET}"
   printf '%s\n' "${C_GREEN}  Installation complete!  /  نصب با موفقیت انجام شد!${C_RESET}"
   printf '%s\n\n' "${C_GREEN}=================================================================${C_RESET}"
 
-  printf '%s\n' "Open this URL in your browser to finish the WordPress install:"
-  printf '%s\n\n' "برای تکمیل نصب وردپرس این آدرس را در مرورگر باز کنید:"
-  printf '    %s\n\n' "${C_CYAN}${scheme}://${DOMAIN}${C_RESET}"
+  printf '%s\n' "${C_GREEN}─────────────────────────────────────────────────────────────────${C_RESET}"
+  printf '%s\n' "  👉  Open this address in your browser to install WordPress:"
+  printf '%s\n\n' "  👉  این آدرس را در مرورگر باز کنید تا وردپرس نصب شود:"
+  printf '        %s\n' "${C_CYAN}${url}/wp-admin/install.php${C_RESET}"
+  printf '%s\n' "${C_GREEN}─────────────────────────────────────────────────────────────────${C_RESET}"
+  printf '\n%s\n' "(You can also just open ${C_CYAN}${url}${C_RESET} — it redirects to the installer.)"
+  printf '%s\n\n' "(می‌توانید ${C_CYAN}${url}${C_RESET} را هم باز کنید؛ خودش به صفحه‌ی نصب می‌رود.)"
 
   printf '%s\n' "On the first screen choose your LANGUAGE, then enter these DB details:"
   printf '%s\n\n' "در صفحه‌ی اول زبان را انتخاب کنید، سپس اطلاعات دیتابیس زیر را وارد کنید:"
@@ -566,8 +623,14 @@ print_summary() {
   printf '    %-16s %s\n' "Database host:" "localhost"
   printf '    %-16s %s\n\n' "Table prefix:" "wp_"
 
+  printf '%s\n' "After finishing, your admin panel will be at: ${C_CYAN}${url}/wp-admin${C_RESET}"
+  printf '%s\n\n' "بعد از پایان، پنل مدیریت شما اینجاست: ${C_CYAN}${url}/wp-admin${C_RESET}"
+
   printf '%s\n' "${C_YELLOW}These credentials are also saved (root-only) to: ${CRED_FILE}${C_RESET}"
   printf '%s\n' "${C_YELLOW}این اطلاعات در فایل بالا هم ذخیره شده است (فقط برای root).${C_RESET}"
+
+  printf '\n%s\n' "Security enabled: UFW firewall, Fail2ban, automatic security updates."
+  printf '%s\n' "امنیت فعال شد: فایروال UFW، Fail2ban، و بروزرسانی امنیتی خودکار."
 
   if [[ "${BEHIND_CDN}" == "yes" ]]; then
     printf '\n%s\n' "Note: enable SSL in your CDN panel (ArvanCloud/Cloudflare)."
@@ -598,6 +661,7 @@ main() {
   tune_php
   download_wordpress
   configure_nginx_site
+  harden_system
   save_credentials
   print_summary
 }

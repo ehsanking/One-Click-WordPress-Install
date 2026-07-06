@@ -1,9 +1,11 @@
 # Security Guide — Hardening your WordPress server
 
-`install.sh` ships with secure defaults (random DB credentials, `unix_socket`
-root auth, restricted DB user, locked-down credentials file, dotfile blocking,
-`cgi.fix_pathinfo=0`). This guide teaches you the **extra steps** to keep the
-server and the site safe over time.
+`install.sh` ships with secure defaults **and turns key protections on for
+you**: random DB credentials, `unix_socket` root auth, a restricted DB user, a
+locked-down credentials file, `cgi.fix_pathinfo=0`, Nginx rules (dotfiles,
+`wp-config.php` and PHP-in-`uploads/` blocked), an enabled **UFW firewall**,
+**Fail2ban**, and **automatic security updates**. This guide teaches you the
+**extra steps** to keep the server and the site safe over time.
 
 > مستندات فارسی در پایین همین صفحه است ⬇️
 
@@ -12,9 +14,11 @@ server and the site safe over time.
 ## A. Server security
 
 ### 1. Keep the system patched
+> The installer already enables **automatic security updates**
+> (`unattended-upgrades`). The commands below are for manual updates / review.
 ```bash
 sudo apt update && sudo apt upgrade -y
-# Enable automatic security updates:
+# Automatic security updates (already enabled by the installer):
 sudo apt install -y unattended-upgrades
 sudo dpkg-reconfigure --priority=low unattended-upgrades
 ```
@@ -31,17 +35,22 @@ passwords, and restart: `sudo systemctl restart ssh`.
 > Optional: change the SSH port from 22 to a custom one to cut bot noise.
 > If you do, also run `sudo ufw allow <new-port>/tcp` first.
 
-### 3. Turn on the firewall
-The script *adds* UFW rules but does not enable the firewall (to avoid locking
-you out). Once you've confirmed SSH access, enable it:
+### 3. Firewall (already enabled by the installer)
+The installer now **enables UFW automatically**, allowing your detected SSH
+port plus HTTP/HTTPS. Verify it and review the rules:
 ```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 'Nginx Full'
-sudo ufw enable
-sudo ufw status
+sudo ufw status verbose
+```
+If you use a non-standard SSH port and it isn't listed, add it before relying
+on the firewall:
+```bash
+sudo ufw allow <your-ssh-port>/tcp
+sudo ufw reload
 ```
 
 ### 4. Block brute-force with Fail2ban
+> Already installed and enabled by the installer (SSH jail on). Commands below
+> are for manual setup or verification (`sudo fail2ban-client status sshd`).
 ```bash
 sudo apt install -y fail2ban
 sudo systemctl enable --now fail2ban
@@ -102,14 +111,17 @@ If you suspect a leak, replace the `AUTH_KEY` … `NONCE_SALT` block in
 <https://api.wordpress.org/secret-key/1.1/salt/>. This logs everyone out.
 
 ### 8. Protect sensitive files in Nginx
-Add inside your `server { … }` block (`/etc/nginx/sites-available/your-domain.com`):
+> The installer already blocks `wp-config.php`, hidden files, and PHP execution
+> inside `wp-content/uploads/`. The snippet below adds a couple more patterns —
+> add them inside your `server { … }` block
+> (`/etc/nginx/sites-available/your-domain.com`):
 ```nginx
-# Block direct access to wp-config and other sensitive files
+# Already applied by the installer:
 location = /wp-config.php { deny all; }
-location ~* /(?:\.git|\.env|composer\.(json|lock))$ { deny all; }
-
-# Stop PHP from executing inside the uploads folder
 location ~* /wp-content/uploads/.*\.php$ { deny all; }
+
+# Extra hardening you can add:
+location ~* /(?:\.git|\.env|composer\.(json|lock))$ { deny all; }
 
 # Throttle login & XML-RPC (optional, needs a limit_req_zone in http{})
 location = /xmlrpc.php { deny all; }   # block if you don't use the app/API
@@ -174,10 +186,12 @@ sudo nginx -t && sudo systemctl reload nginx
 
 # راهنمای امنیت — سخت‌سازی سرور وردپرس
 
-`install.sh` با پیش‌فرض‌های امن می‌آید (رمز دیتابیس تصادفی، احراز هویت
-`unix_socket` برای root، کاربر دیتابیس محدود، فایل اطلاعات قفل‌شده، مسدودسازی
-dotfileها، و `cgi.fix_pathinfo=0`). این راهنما **مراحل اضافه** را آموزش می‌دهد
-تا سرور و سایت در طول زمان امن بمانند.
+`install.sh` با پیش‌فرض‌های امن می‌آید **و محافظت‌های کلیدی را برایتان فعال
+می‌کند**: رمز دیتابیس تصادفی، احراز هویت `unix_socket` برای root، کاربر دیتابیس
+محدود، فایل اطلاعات قفل‌شده، `cgi.fix_pathinfo=0`، قوانین Nginx (مسدودسازی
+dotfileها، `wp-config.php` و اجرای PHP در `uploads/`)، فایروال **UFW** فعال،
+**Fail2ban**، و **بروزرسانی امنیتی خودکار**. این راهنما **مراحل اضافه** را آموزش
+می‌دهد تا سرور و سایت در طول زمان امن بمانند.
 
 ## الف. امنیت سرور
 
@@ -201,17 +215,21 @@ PasswordAuthentication no      # فقط با کلید SSH
 > اختیاری: پورت SSH را از ۲۲ به یک پورت دلخواه تغییر دهید تا حملات ربات‌ها کم
 > شود. اگر این کار را کردید، اول `sudo ufw allow <پورت-جدید>/tcp` را بزنید.
 
-### ۳. فعال‌کردن فایروال
-اسکریپت قوانین UFW را *اضافه* می‌کند ولی فایروال را فعال نمی‌کند (تا دسترسی شما
-قطع نشود). بعد از اطمینان از دسترسی SSH، فعالش کنید:
+### ۳. فایروال (توسط نصب‌کننده فعال شده)
+نصب‌کننده حالا **UFW را به‌صورت خودکار فعال می‌کند** و پورت SSH تشخیص‌داده‌شده به
+همراه HTTP/HTTPS را باز می‌گذارد. وضعیت و قوانین را بررسی کنید:
 ```bash
-sudo ufw allow OpenSSH
-sudo ufw allow 'Nginx Full'
-sudo ufw enable
-sudo ufw status
+sudo ufw status verbose
+```
+اگر پورت SSH غیراستاندارد دارید و در فهرست نیست، قبل از تکیه بر فایروال آن را
+اضافه کنید:
+```bash
+sudo ufw allow <پورت-ssh-شما>/tcp
+sudo ufw reload
 ```
 
 ### ۴. جلوگیری از حمله‌ی Brute-force با Fail2ban
+> نصب‌کننده Fail2ban را به‌صورت خودکار نصب و فعال کرده است. برای نصب دستی:
 ```bash
 sudo apt install -y fail2ban
 sudo systemctl enable --now fail2ban

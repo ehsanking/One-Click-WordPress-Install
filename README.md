@@ -33,11 +33,15 @@ automated, with a random database/user/password generated for you.
   and auto-creates a **random** database, user and password
 - 🧩 Downloads the matching **ionCube Loader**, installs it into the correct
   path and wires it into `php.ini` (as the first `zend_extension`)
-- ⚙️ Tunes `php.ini`: **50M** uploads and **1GB** memory limit
+- ⚙️ Tunes `php.ini`: **100M** uploads and **1GB** memory limit
 - 📥 Downloads **WordPress** so you finish the famous web installer and pick
-  the **language** yourself (the DB credentials are printed for you to enter)
+  the **language** yourself (the DB credentials are printed for you to enter),
+  and prints the **exact install URL** so you don't get lost
 - 🛟 Creates a 2GB swap file automatically if the server has less than 1GB RAM
-- 🔥 Basic UFW firewall rules (SSH + Nginx) so you are never locked out
+- 🔥 **Security hardening, turned on automatically**: UFW firewall (your SSH
+  port is auto-detected so you're never locked out), **Fail2ban**, **automatic
+  security updates**, and Nginx rules that protect `wp-config.php` and block
+  PHP execution inside `wp-content/uploads/`
 
 ---
 
@@ -207,11 +211,15 @@ services and is intended for new VPS/cloud instances.
   ساخت خودکار دیتابیس و یوزر و رمز **تصادفی**
 - 🧩 دانلود **ionCube** مناسب، نصب در مسیر درست و افزودن آن به `php.ini`
   (به‌عنوان اولین `zend_extension`)
-- ⚙️ تنظیم `php.ini` روی آپلود **۵۰ مگابایت** و حافظه‌ی **۱ گیگابایت**
+- ⚙️ تنظیم `php.ini` روی آپلود **۱۰۰ مگابایت** و حافظه‌ی **۱ گیگابایت**
 - 📥 دانلود **وردپرس** تا خودتان نصب وب را کامل کنید و **زبان** را انتخاب کنید
-  (اطلاعات دیتابیس برای واردکردن نمایش داده می‌شود)
+  (اطلاعات دیتابیس برای واردکردن نمایش داده می‌شود) و نمایش **آدرس دقیق نصب** تا
+  گیج نشوید
 - 🛟 ساخت خودکار فایل swap دو گیگابایتی اگر رم سرور کمتر از ۱ گیگ باشد
-- 🔥 تنظیمات اولیه‌ی فایروال UFW (SSH و Nginx) تا دسترسی‌تان قطع نشود
+- 🔥 **سخت‌سازی امنیتی، به‌صورت خودکار فعال می‌شود**: فایروال UFW (پورت SSH شما
+  تشخیص داده می‌شود تا دسترسی‌تان قطع نشود)، **Fail2ban**، **بروزرسانی امنیتی
+  خودکار**، و قوانین Nginx برای محافظت از `wp-config.php` و جلوگیری از اجرای PHP
+  در `wp-content/uploads/`
 
 ## ✅ پیش‌نیازها
 

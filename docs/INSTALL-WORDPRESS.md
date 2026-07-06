@@ -135,7 +135,7 @@ sudo -u www-data wp user update admin --user_pass='NEW-STRONG-PASSWORD'
 | Default Nginx page instead of WordPress | The site config didn't load. Run `sudo nginx -t && sudo systemctl reload nginx`. |
 | 502 Bad Gateway | PHP-FPM not running. Restart it (use your installed version): `sudo systemctl restart php8.3-fpm`. Not sure which version? `ls /etc/php`. |
 | White screen / 500 error | Check logs: `sudo tail -f /var/log/nginx/error.log` and `/var/log/php8.3-fpm.log` (match your PHP version). |
-| Can't upload large media | Confirm `php.ini` tuning loaded: `php -i | grep upload_max_filesize` (should be 50M). |
+| Can't upload large media | Confirm `php.ini` tuning loaded: `php -i | grep upload_max_filesize` (should be 100M). |
 | HTTPS not working behind CDN | Set the SSL mode to *Flexible/Full* in the CDN panel. |
 
 ---
@@ -266,7 +266,7 @@ sudo -u www-data wp user update admin --user_pass='رمز-قوی-جدید'
 | صفحه‌ی پیش‌فرض Nginx به‌جای وردپرس | کانفیگ سایت بارگذاری نشده: `sudo nginx -t && sudo systemctl reload nginx`. |
 | خطای 502 Bad Gateway | PHP-FPM اجرا نیست. با نسخه‌ی نصب‌شده ری‌استارت کنید: `sudo systemctl restart php8.3-fpm`. نسخه‌تان را نمی‌دانید؟ `ls /etc/php`. |
 | صفحه‌ی سفید / خطای 500 | لاگ‌ها را ببینید: `sudo tail -f /var/log/nginx/error.log`. |
-| آپلود فایل بزرگ ممکن نیست | بررسی کنید تنظیم php.ini اعمال شده: `php -i | grep upload_max_filesize` (باید 50M باشد). |
+| آپلود فایل بزرگ ممکن نیست | بررسی کنید تنظیم php.ini اعمال شده: `php -i | grep upload_max_filesize` (باید 100M باشد). |
 | HTTPS پشت CDN کار نمی‌کند | حالت SSL را در پنل CDN روی *Flexible/Full* بگذارید. |
 
 </div>
