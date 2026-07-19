@@ -17,6 +17,7 @@
 #   - Tune php.ini  (upload 100M, memory_limit 1024M)
 #   - Speed pack: Redis object cache, OPcache tuning, Nginx gzip
 #   - Automatic daily backups (wp-backup / wp-restore, kept in /root/backups)
+#   - A friendly management menu: `wpctl` (status, backup, update, SSL, …)
 #   - Enable security hardening (UFW firewall, Fail2ban, auto security updates)
 #   - Either: download WordPress so the user finishes the famous web installer
 #     (picking the language) using the database credentials we print,
@@ -808,11 +809,12 @@ NG
 setup_backups() {
   step "Automatic backups / بکاپ خودکار"
 
-  # Per-site config read by wp-backup / wp-restore.
+  # Per-site config read by wp-backup / wp-restore / wpctl.
   cat > /etc/one-click-wp.conf <<-EOF
 		# One-Click WordPress site configuration
 		DOMAIN="${DOMAIN}"
 		WEBROOT="${WEBROOT}"
+		PHP_VERSION="${PHP_VERSION}"
 		BACKUP_DIR="/root/backups"
 		BACKUP_KEEP="7"
 	EOF
@@ -903,6 +905,201 @@ RST
       || warn "Initial backup skipped."
   fi
   ok "Daily backups scheduled (03:30) → /root/backups   (use: wp-backup / wp-restore)."
+}
+
+# Install `wpctl`: a friendly management menu (and CLI) so a non-expert can run
+# common tasks without memorising commands.
+install_wpctl() {
+  step "Management command / دستور مدیریتی wpctl"
+  cat > /usr/local/bin/wpctl <<'WPCTL'
+#!/usr/bin/env bash
+# wpctl — simple management menu for your One-Click WordPress server.
+set -uo pipefail
+export PATH="/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+
+CONF=/etc/one-click-wp.conf
+[[ -r "$CONF" ]] || { echo "Missing $CONF — is this a One-Click WordPress server?"; exit 1; }
+# shellcheck disable=SC1090
+. "$CONF"
+PHP_VERSION="${PHP_VERSION:-$(ls /etc/php 2>/dev/null | sort -V | tail -n1)}"
+if [[ -d "/etc/letsencrypt/live/${DOMAIN}" ]]; then SCHEME=https; else SCHEME=http; fi
+URL="${SCHEME}://${DOMAIN}"
+
+C_R=$'\033[0m'; C_G=$'\033[1;32m'; C_Y=$'\033[1;33m'; C_C=$'\033[1;36m'; C_RED=$'\033[1;31m'
+[[ -t 1 ]] || { C_R=""; C_G=""; C_Y=""; C_C=""; C_RED=""; }
+
+need_root(){ [[ ${EUID} -eq 0 ]] || { echo "Please run as root (sudo wpctl)"; exit 1; }; }
+WP(){ wp "$@" --path="$WEBROOT" --allow-root; }
+have_wp(){ [[ -f "$WEBROOT/wp-config.php" ]]; }
+pause(){ printf '\n%sPress Enter to continue…%s ' "$C_Y" "$C_R"; read -r _ </dev/tty || true; }
+
+status(){
+  echo "${C_C}== Status / وضعیت ==${C_R}"
+  echo "Site: $URL"
+  local svc
+  for svc in nginx "php${PHP_VERSION}-fpm" mariadb redis-server fail2ban; do
+    if systemctl is-active --quiet "$svc" 2>/dev/null; then
+      printf '  %s[running]%s %s\n' "$C_G" "$C_R" "$svc"
+    else
+      printf '  %s[stopped]%s %s\n' "$C_RED" "$C_R" "$svc"
+    fi
+  done
+  local code; code=$(curl -s -o /dev/null -w '%{http_code}' -m 10 "$URL" 2>/dev/null || echo "---")
+  echo "HTTP response: $code"
+  df -h / | awk 'NR==2{printf "Disk: %s free of %s (%s used)\n",$4,$2,$5}'
+  free -h 2>/dev/null | awk '/Mem:/{printf "RAM: %s used / %s total\n",$3,$2}'
+  have_wp && echo "WordPress: $(WP core version 2>/dev/null || echo '?')"
+}
+
+do_update(){
+  echo "${C_C}== Update WordPress, plugins & themes ==${C_R}"
+  have_wp || { echo "WordPress isn't set up yet (finish the web installer first)."; return; }
+  WP core update || true
+  WP core update-db || true
+  WP plugin update --all || true
+  WP theme update --all || true
+  echo "${C_G}Update finished.${C_R}"
+}
+
+do_info(){
+  echo "${C_C}== Site & login info ==${C_R}"
+  echo "Site:  $URL"
+  echo "Admin: $URL/wp-admin"
+  [[ -f /root/wordpress-credentials.txt ]] && { echo; cat /root/wordpress-credentials.txt; }
+}
+
+do_ssl(){
+  need_root
+  echo "${C_C}== Get / renew SSL ==${C_R}"
+  local email; printf 'Email for renewal notices: '; read -r email </dev/tty || true
+  apt-get install -y certbot python3-certbot-nginx >/dev/null 2>&1 || true
+  if certbot --nginx -d "$DOMAIN" -d "www.$DOMAIN" --non-interactive --agree-tos --redirect -m "$email"; then
+    echo "${C_G}SSL installed.${C_R}"
+    if have_wp; then
+      WP search-replace "http://$DOMAIN" "https://$DOMAIN" --all-tables --skip-columns=guid --quiet || true
+      WP option update home "https://$DOMAIN" --quiet || true
+      WP option update siteurl "https://$DOMAIN" --quiet || true
+      echo "Site URL switched to https."
+    fi
+  else
+    echo "${C_RED}Certbot failed — check the domain's DNS points to this server.${C_R}"
+  fi
+}
+
+do_upload(){
+  need_root
+  echo "${C_C}== Change max upload size ==${C_R}"
+  local size="${1:-}"
+  [[ -z "$size" ]] && { printf 'New upload limit (e.g. 100M, 256M): '; read -r size </dev/tty || true; }
+  [[ "$size" =~ ^[0-9]+M$ ]] || { echo "Enter a value like 100M or 256M."; return; }
+  local num post; num="${size%M}"; post="$((num+28))M"
+  local sapi ini
+  for sapi in fpm cli; do
+    ini="/etc/php/${PHP_VERSION}/${sapi}/conf.d/99-wordpress.ini"
+    [[ -f "$ini" ]] || continue
+    sed -i "s/^upload_max_filesize.*/upload_max_filesize = ${size}/" "$ini"
+    sed -i "s/^post_max_size.*/post_max_size = ${post}/" "$ini"
+  done
+  local vhost="/etc/nginx/sites-available/${DOMAIN}"
+  [[ -f "$vhost" ]] && sed -i "s/client_max_body_size .*/client_max_body_size ${post};/" "$vhost"
+  systemctl restart "php${PHP_VERSION}-fpm" >/dev/null 2>&1 || true
+  nginx -t >/dev/null 2>&1 && systemctl reload nginx >/dev/null 2>&1 || true
+  echo "${C_G}Upload limit set to ${size} (post ${post}).${C_R}"
+}
+
+do_password(){
+  need_root
+  have_wp || { echo "WordPress isn't set up yet."; return; }
+  echo "${C_C}== Admin users ==${C_R}"
+  WP user list --role=administrator --fields=ID,user_login,user_email 2>/dev/null || true
+  local u; printf "\nUsername to reset (or 'new' to create an admin): "; read -r u </dev/tty || true
+  [[ -z "$u" ]] && return
+  if [[ "$u" == "new" ]]; then
+    local nl ne np
+    printf 'New username: '; read -r nl </dev/tty
+    printf 'Email: ';        read -r ne </dev/tty
+    printf 'Password: ';     read -rs np </dev/tty; echo
+    WP user create "$nl" "$ne" --role=administrator --user_pass="$np" && echo "${C_G}Created.${C_R}"
+  else
+    local np; printf 'New password: '; read -rs np </dev/tty; echo
+    WP user update "$u" --user_pass="$np" && echo "${C_G}Password updated.${C_R}"
+  fi
+}
+
+do_flush(){
+  echo "${C_C}== Flush caches ==${C_R}"
+  if have_wp; then WP cache flush 2>/dev/null || true; WP redis flush 2>/dev/null || true; fi
+  systemctl reload "php${PHP_VERSION}-fpm" >/dev/null 2>&1 || true
+  echo "${C_G}Caches flushed.${C_R}"
+}
+
+do_maint(){
+  have_wp || { echo "WordPress isn't set up yet."; return; }
+  local m="${1:-}"
+  [[ -z "$m" ]] && { printf 'Maintenance mode (on/off): '; read -r m </dev/tty || true; }
+  case "$m" in
+    on)  WP maintenance-mode activate   && echo "Maintenance mode ON.";;
+    off) WP maintenance-mode deactivate && echo "Maintenance mode OFF.";;
+    *)   echo "Use on or off.";;
+  esac
+}
+
+do_logs(){
+  echo "${C_C}== Recent Nginx errors ==${C_R}"
+  tail -n 40 /var/log/nginx/error.log 2>/dev/null || echo "(none)"
+  echo; echo "${C_C}== Recent PHP-FPM log ==${C_R}"
+  tail -n 20 "/var/log/php${PHP_VERSION}-fpm.log" 2>/dev/null || echo "(none)"
+}
+
+menu(){
+  while true; do
+    printf '\n%s── wpctl — %s ──%s\n' "$C_C" "$DOMAIN" "$C_R"
+    printf '%s\n' \
+      "  1) Status / health        وضعیت سرور" \
+      "  2) Backup now             بکاپ فوری" \
+      "  3) Restore a backup       بازگردانی" \
+      "  4) Update WP + plugins    آپدیت وردپرس و افزونه‌ها" \
+      "  5) Site & login info      اطلاعات سایت و ورود" \
+      "  6) Get / renew SSL        دریافت/تمدید SSL" \
+      "  7) Change upload size     تغییر سقف آپلود" \
+      "  8) Admin password / user  رمز یا کاربر مدیر" \
+      "  9) Flush caches           پاک‌کردن کش" \
+      " 10) Maintenance mode       حالت تعمیر" \
+      " 11) View error logs        مشاهده لاگ‌ها" \
+      "  0) Quit                   خروج"
+    printf '%sChoose:%s ' "$C_Y" "$C_R"; read -r c </dev/tty || break
+    case "$c" in
+      1) status;; 2) wp-backup;; 3) wp-restore;; 4) do_update;; 5) do_info;;
+      6) do_ssl;; 7) do_upload;; 8) do_password;; 9) do_flush;;
+      10) do_maint;; 11) do_logs;; 0|q|Q) exit 0;;
+      *) echo "Invalid choice.";;
+    esac
+    pause
+  done
+}
+
+case "${1:-menu}" in
+  menu|"")     menu;;
+  status)      status;;
+  backup)      wp-backup;;
+  restore)     shift; wp-restore "$@";;
+  update)      do_update;;
+  info)        do_info;;
+  ssl)         do_ssl;;
+  upload)      shift; do_upload "$@";;
+  password)    do_password;;
+  flush)       do_flush;;
+  maintenance) shift; do_maint "$@";;
+  logs)        do_logs;;
+  -h|--help|help)
+    echo "wpctl — manage your WordPress server"
+    echo "Usage: wpctl [status|backup|restore|update|info|ssl|upload <size>|password|flush|maintenance <on|off>|logs]"
+    echo "Run 'wpctl' with no arguments for the interactive menu.";;
+  *) echo "Unknown command: $1 (try: wpctl help)"; exit 1;;
+esac
+WPCTL
+  chmod +x /usr/local/bin/wpctl
+  ok "Management command installed → run: wpctl"
 }
 
 save_credentials() {
@@ -1005,6 +1202,8 @@ print_summary() {
   printf '\n%s\n' "Daily backups → /root/backups   (run ${C_CYAN}wp-backup${C_RESET} anytime, ${C_CYAN}wp-restore${C_RESET} to roll back)."
   printf '%s\n' "بکاپ روزانه → /root/backups   (دستور ${C_CYAN}wp-backup${C_RESET} برای بکاپ فوری و ${C_CYAN}wp-restore${C_RESET} برای بازگردانی)."
   printf '%s\n' "Speed pack: Redis + OPcache + gzip enabled."
+  printf '%s\n' "Manage everything with one simple menu — just run: ${C_CYAN}wpctl${C_RESET}"
+  printf '%s\n' "همه‌چیز را با یک منوی ساده مدیریت کنید — کافیست بزنید: ${C_CYAN}wpctl${C_RESET}"
   if [[ "${INSTALL_MODE}" != "migrate" ]]; then
     printf '%s\n' "${C_YELLOW}Tip: after finishing setup, install the 'Redis Object Cache' plugin and click Enable for faster DB caching.${C_RESET}"
     printf '%s\n' "${C_YELLOW}نکته: بعد از نصب، افزونه‌ی 'Redis Object Cache' را نصب و فعال کنید تا کش دیتابیس سریع‌تر شود.${C_RESET}"
@@ -1046,6 +1245,7 @@ main() {
   setup_speed_pack
   harden_system
   setup_backups
+  install_wpctl
   save_credentials
   print_summary
 }

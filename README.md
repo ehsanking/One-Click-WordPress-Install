@@ -52,6 +52,9 @@ automated, with a random database/user/password generated for you.
   commands — the safety net a VPS doesn't give you out of the box
 - ⚡ **Speed pack**: **Redis** object cache, **OPcache** tuning and Nginx
   **gzip** compression, so the site is noticeably faster than shared hosting
+- 🎛️ **A friendly management menu — `wpctl`**: check status, back up / restore,
+  update WordPress, get SSL, change the upload size, reset passwords, flush
+  caches, toggle maintenance mode and view logs — no commands to memorise
 
 ---
 
@@ -137,6 +140,26 @@ The same credentials are also saved, readable by **root only**, at:
   troubleshooting.
 - **[Security guide](docs/SECURITY.md)** — server and WordPress hardening:
   SSH, firewall, Fail2ban, 2FA, backups, CDN tips and a quick checklist.
+
+---
+
+## 🎛️ Managing your server with `wpctl`
+
+After install, just run **`wpctl`** for an interactive menu — or use it directly:
+
+```bash
+wpctl                    # open the menu
+wpctl status             # services, HTTP status, disk, RAM, WP version
+wpctl backup             # back up now   (wpctl restore to roll back)
+wpctl update             # update WordPress core, plugins & themes
+wpctl info               # show site URL, admin URL and saved credentials
+wpctl ssl                # get / renew a Let's Encrypt certificate
+wpctl upload 256M        # change the max upload size
+wpctl password           # reset an admin password or create an admin
+wpctl flush              # flush object + OPcache
+wpctl maintenance on|off # maintenance mode
+wpctl logs               # recent Nginx / PHP-FPM errors
+```
 
 ---
 
@@ -241,6 +264,9 @@ services and is intended for new VPS/cloud instances.
   همان تور نجاتی که VPS به‌صورت پیش‌فرض ندارد
 - ⚡ **بسته‌ی سرعت**: **Redis** object cache، تنظیم **OPcache** و فشرده‌سازی
   **gzip** در Nginx تا سایت محسوساً از هاست اشتراکی سریع‌تر باشد
+- 🎛️ **منوی مدیریتی ساده — `wpctl`**: بررسی وضعیت، بکاپ/بازگردانی، آپدیت
+  وردپرس، دریافت SSL، تغییر سقف آپلود، تغییر رمز، پاک‌کردن کش، حالت تعمیر و
+  مشاهده‌ی لاگ‌ها — بدون نیاز به حفظ‌کردن هیچ دستوری
 
 ## ✅ پیش‌نیازها
 
@@ -317,6 +343,24 @@ bash <(wget -qO- https://raw.githubusercontent.com/ehsanking/One-Click-WordPress
   وردپرس در مرورگر، به‌همراه دستورهای مفید WP-CLI و رفع اشکال.
 - **[راهنمای امنیت](docs/SECURITY.md)** — سخت‌سازی سرور و وردپرس: SSH،
   فایروال، Fail2ban، احراز هویت دومرحله‌ای، پشتیبان‌گیری، نکات CDN و چک‌لیست.
+
+## 🎛️ مدیریت سرور با `wpctl`
+
+بعد از نصب، کافیست **`wpctl`** را اجرا کنید تا منوی تعاملی باز شود — یا مستقیم:
+
+```bash
+wpctl                    # باز کردن منو
+wpctl status             # وضعیت سرویس‌ها، HTTP، دیسک، رم، نسخه‌ی وردپرس
+wpctl backup             # بکاپ فوری   (wpctl restore برای بازگردانی)
+wpctl update             # آپدیت هسته، افزونه‌ها و پوسته‌ها
+wpctl info               # نمایش آدرس سایت، پنل مدیریت و اطلاعات ذخیره‌شده
+wpctl ssl                # دریافت/تمدید گواهی Let's Encrypt
+wpctl upload 256M        # تغییر سقف آپلود
+wpctl password           # تغییر رمز مدیر یا ساخت کاربر مدیر
+wpctl flush              # پاک‌کردن object cache و OPcache
+wpctl maintenance on|off # حالت تعمیر
+wpctl logs               # خطاهای اخیر Nginx / PHP-FPM
+```
 
 ## 🧩 اجزای نصب‌شده
 
