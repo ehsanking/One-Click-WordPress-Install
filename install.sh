@@ -15,6 +15,8 @@
 #   - Install MariaDB and auto-create a random database, user and password
 #   - Download & install the correct ionCube Loader and wire it into php.ini
 #   - Tune php.ini  (upload 100M, memory_limit 1024M)
+#   - Speed pack: Redis object cache, OPcache tuning, Nginx gzip
+#   - Automatic daily backups (wp-backup / wp-restore, kept in /root/backups)
 #   - Enable security hardening (UFW firewall, Fail2ban, auto security updates)
 #   - Either: download WordPress so the user finishes the famous web installer
 #     (picking the language) using the database credentials we print,
@@ -745,6 +747,164 @@ harden_system() {
   fi
 }
 
+setup_speed_pack() {
+  step "Speed pack (Redis, OPcache, gzip) / بسته‌ی سرعت"
+
+  # Redis server + PHP extension (object cache backend, bound to localhost).
+  if apt-get install -y redis-server "php${PHP_VERSION}-redis" >/dev/null 2>&1; then
+    systemctl enable --now redis-server >/dev/null 2>&1 || true
+    ok "Redis installed and running (127.0.0.1:6379)."
+  else
+    warn "Redis could not be installed; skipping object cache."
+  fi
+
+  # OPcache tuning for both SAPIs (pure speed win, no staleness risk).
+  local sapi
+  for sapi in fpm cli; do
+    cat > "/etc/php/${PHP_VERSION}/${sapi}/conf.d/98-opcache.ini" <<-INI
+		opcache.enable=1
+		opcache.enable_cli=0
+		opcache.memory_consumption=192
+		opcache.interned_strings_buffer=16
+		opcache.max_accelerated_files=20000
+		opcache.revalidate_freq=2
+		opcache.fast_shutdown=1
+	INI
+  done
+  systemctl restart "php${PHP_VERSION}-fpm" >/dev/null 2>&1 || true
+
+  # Nginx gzip + bigger FastCGI buffers. `gzip on;` is already active in the
+  # stock nginx.conf, so we only add the sub-settings (no duplicate directive).
+  cat > /etc/nginx/conf.d/10-performance.conf <<'NG'
+# One-Click WordPress performance tuning
+gzip_vary on;
+gzip_proxied any;
+gzip_comp_level 5;
+gzip_min_length 256;
+gzip_types text/plain text/css text/xml application/json application/javascript application/xml application/rss+xml text/javascript image/svg+xml font/woff2;
+fastcgi_buffers 16 16k;
+fastcgi_buffer_size 32k;
+NG
+  if nginx -t >/dev/null 2>&1; then
+    systemctl reload nginx >/dev/null 2>&1 || true
+    ok "Nginx gzip compression enabled."
+  else
+    warn "Performance nginx config was rejected; reverting it."
+    rm -f /etc/nginx/conf.d/10-performance.conf
+  fi
+
+  # When the site is already live (migration), install & enable the Redis
+  # Object Cache plugin. For a fresh install the user activates it later.
+  if [[ "${INSTALL_MODE}" == "migrate" && -f "${WEBROOT}/wp-config.php" ]]; then
+    if command -v redis-cli >/dev/null && redis-cli ping >/dev/null 2>&1; then
+      wp plugin install redis-cache --activate \
+        --path="${WEBROOT}" --allow-root --quiet 2>/dev/null || true
+      wp redis enable --path="${WEBROOT}" --allow-root 2>/dev/null || true
+      ok "Redis object cache enabled for the site."
+    fi
+  fi
+}
+
+setup_backups() {
+  step "Automatic backups / بکاپ خودکار"
+
+  # Per-site config read by wp-backup / wp-restore.
+  cat > /etc/one-click-wp.conf <<-EOF
+		# One-Click WordPress site configuration
+		DOMAIN="${DOMAIN}"
+		WEBROOT="${WEBROOT}"
+		BACKUP_DIR="/root/backups"
+		BACKUP_KEEP="7"
+	EOF
+  chmod 600 /etc/one-click-wp.conf
+
+  # --- wp-backup: dump the DB + tar the files, with rotation --------------
+  cat > /usr/local/bin/wp-backup <<'BKP'
+#!/usr/bin/env bash
+# Back up the WordPress database and files. Run by cron daily, or manually.
+set -euo pipefail
+export PATH="/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+CONF=/etc/one-click-wp.conf
+[[ -r "$CONF" ]] || { echo "Missing $CONF"; exit 1; }
+# shellcheck disable=SC1090
+. "$CONF"
+ts="$(date +%Y%m%d-%H%M%S)"
+dest="${BACKUP_DIR}/${DOMAIN}"
+mkdir -p "$dest"
+
+# Database (only once WordPress is configured, i.e. wp-config.php exists).
+if [[ -f "${WEBROOT}/wp-config.php" ]]; then
+  tmp="$(mktemp)"
+  if wp db export "$tmp" --path="$WEBROOT" --allow-root >/dev/null 2>&1; then
+    gzip -c "$tmp" > "${dest}/db-${ts}.sql.gz"
+  else
+    echo "WARNING: database export failed"
+  fi
+  rm -f "$tmp"
+fi
+
+# Files.
+tar -czf "${dest}/files-${ts}.tar.gz" -C "$(dirname "$WEBROOT")" "$(basename "$WEBROOT")"
+
+# Rotation: keep the newest BACKUP_KEEP of each kind. Sort by NAME (the
+# filenames embed a sortable timestamp) so it doesn't depend on mtime.
+ls -1 "${dest}"/db-*.sql.gz    2>/dev/null | sort | head -n -"${BACKUP_KEEP}" | xargs -r rm -f || true
+ls -1 "${dest}"/files-*.tar.gz 2>/dev/null | sort | head -n -"${BACKUP_KEEP}" | xargs -r rm -f || true
+echo "[$(date)] Backup complete: ${dest} (kept last ${BACKUP_KEEP})"
+BKP
+  chmod +x /usr/local/bin/wp-backup
+
+  # --- wp-restore: restore files + DB from a chosen backup ---------------
+  cat > /usr/local/bin/wp-restore <<'RST'
+#!/usr/bin/env bash
+# Restore the WordPress site from a backup. Usage: wp-restore [TIMESTAMP]
+set -euo pipefail
+export PATH="/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+CONF=/etc/one-click-wp.conf
+[[ -r "$CONF" ]] || { echo "Missing $CONF"; exit 1; }
+# shellcheck disable=SC1090
+. "$CONF"
+dest="${BACKUP_DIR}/${DOMAIN}"
+ts="${1:-}"
+if [[ -z "$ts" ]]; then
+  echo "Available backups for ${DOMAIN}:"
+  ls -1 "${dest}"/files-*.tar.gz 2>/dev/null | sed 's#.*/files-##; s#\.tar\.gz##' || true
+  printf 'Timestamp to restore (blank = latest): '
+  read -r ts </dev/tty || true
+fi
+[[ -z "$ts" ]] && ts="$(ls -1 "${dest}"/files-*.tar.gz 2>/dev/null | sort | tail -n1 | sed 's#.*/files-##; s#\.tar\.gz##')"
+files="${dest}/files-${ts}.tar.gz"
+db="${dest}/db-${ts}.sql.gz"
+[[ -f "$files" ]] || { echo "Backup not found: $files"; exit 1; }
+echo "Restoring ${ts} ..."
+tar -xzf "$files" -C "$(dirname "$WEBROOT")"
+chown -R www-data:www-data "$WEBROOT"
+if [[ -f "$db" && -f "${WEBROOT}/wp-config.php" ]]; then
+  tmp="$(mktemp)"; zcat "$db" > "$tmp"
+  wp db import "$tmp" --path="$WEBROOT" --allow-root   # dump includes DROP TABLE
+  rm -f "$tmp"
+fi
+wp cache flush --path="$WEBROOT" --allow-root 2>/dev/null || true
+echo "Restore complete (${ts})."
+RST
+  chmod +x /usr/local/bin/wp-restore
+
+  # Daily cron at 03:30.
+  cat > /etc/cron.d/one-click-wp-backup <<-EOF
+		# One-Click WordPress daily backup
+		30 3 * * * root /usr/local/bin/wp-backup >> /var/log/wp-backup.log 2>&1
+	EOF
+  chmod 644 /etc/cron.d/one-click-wp-backup
+
+  # Take an initial backup now if the site already has data (migration).
+  if [[ "${INSTALL_MODE}" == "migrate" && -f "${WEBROOT}/wp-config.php" ]]; then
+    /usr/local/bin/wp-backup >/dev/null 2>&1 \
+      && ok "Initial backup created in /root/backups." \
+      || warn "Initial backup skipped."
+  fi
+  ok "Daily backups scheduled (03:30) → /root/backups   (use: wp-backup / wp-restore)."
+}
+
 save_credentials() {
   local scheme="http"
   [[ "${INSTALL_SSL}" == "yes" ]] && scheme="https"
@@ -760,6 +920,8 @@ save_credentials() {
 
 			Log in with the SAME username/password as on your old host.
 			با همان یوزر/رمز مدیریت سایت قبلی وارد شوید.
+
+			Backups        : /root/backups   (wp-backup / wp-restore, daily 03:30)
 
 			--- New database connection (already written to wp-config.php) ---
 			Database name   : ${DB_NAME}
@@ -784,6 +946,8 @@ save_credentials() {
 			Password        : ${DB_PASS}
 			Database host   : localhost
 			Table prefix    : wp_
+
+			Backups         : /root/backups   (wp-backup / wp-restore, daily 03:30)
 			===========================================================
 		EOF
   fi
@@ -838,6 +1002,14 @@ print_summary() {
   printf '\n%s\n' "Security enabled: UFW firewall, Fail2ban, automatic security updates."
   printf '%s\n' "امنیت فعال شد: فایروال UFW، Fail2ban، و بروزرسانی امنیتی خودکار."
 
+  printf '\n%s\n' "Daily backups → /root/backups   (run ${C_CYAN}wp-backup${C_RESET} anytime, ${C_CYAN}wp-restore${C_RESET} to roll back)."
+  printf '%s\n' "بکاپ روزانه → /root/backups   (دستور ${C_CYAN}wp-backup${C_RESET} برای بکاپ فوری و ${C_CYAN}wp-restore${C_RESET} برای بازگردانی)."
+  printf '%s\n' "Speed pack: Redis + OPcache + gzip enabled."
+  if [[ "${INSTALL_MODE}" != "migrate" ]]; then
+    printf '%s\n' "${C_YELLOW}Tip: after finishing setup, install the 'Redis Object Cache' plugin and click Enable for faster DB caching.${C_RESET}"
+    printf '%s\n' "${C_YELLOW}نکته: بعد از نصب، افزونه‌ی 'Redis Object Cache' را نصب و فعال کنید تا کش دیتابیس سریع‌تر شود.${C_RESET}"
+  fi
+
   if [[ "${BEHIND_CDN}" == "yes" ]]; then
     printf '\n%s\n' "Note: enable SSL in your CDN panel (ArvanCloud/Cloudflare)."
     printf '%s\n' "نکته: SSL را از پنل CDN خود فعال کنید."
@@ -871,7 +1043,9 @@ main() {
     download_wordpress
   fi
   configure_nginx_site
+  setup_speed_pack
   harden_system
+  setup_backups
   save_credentials
   print_summary
 }

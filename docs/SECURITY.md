@@ -137,13 +137,23 @@ sudo nginx -t && sudo systemctl reload nginx
 - In **Settings → General**, make sure both URLs use `https://`.
 
 ### 10. Back up regularly
-- Plugin route: *UpdraftPlus* to cloud storage (Google Drive, S3…).
-- CLI route (database dump):
+> The installer already sets up **automatic daily backups** (database + files)
+> in `/root/backups`, keeping the last 7 and rotating older ones. Manage them
+> with the built-in commands:
+> ```bash
+> wp-backup            # take a backup right now
+> wp-restore           # list backups and restore one (or: wp-restore <timestamp>)
+> ```
+- **Add an off-server copy** — the one thing the built-in backups don't do.
+  A backup on the same server won't survive a disk failure. Sync `/root/backups`
+  to cloud storage with `rclone` (Google Drive, S3, Backblaze…) on a cron:
   ```bash
-  mysqldump -u root DBNAME > /root/backup-$(date +%F).sql
+  sudo apt install -y rclone && rclone config   # set up a remote once
+  # then daily:  rclone copy /root/backups remote:wp-backups
   ```
-- Keep at least one **off-server** copy. A backup you can restore is your last
-  line of defence against ransomware and bad updates.
+- Plugin alternative: *UpdraftPlus* backs up straight to cloud storage.
+- A backup you can restore is your last line of defence against ransomware and
+  bad updates — test a restore occasionally.
 
 ---
 
@@ -313,13 +323,23 @@ sudo nginx -t && sudo systemctl reload nginx
 - در **تنظیمات → عمومی** مطمئن شوید هر دو آدرس با `https://` هستند.
 
 ### ۱۰. پشتیبان‌گیری منظم
-- روش افزونه: *UpdraftPlus* به فضای ابری (گوگل‌درایو، S3…).
-- روش خط فرمان (دامپ دیتابیس):
+> نصب‌کننده از قبل **بکاپ روزانه‌ی خودکار** (دیتابیس + فایل‌ها) در `/root/backups`
+> راه‌اندازی کرده، ۷ نسخه‌ی آخر را نگه می‌دارد و بقیه را می‌چرخاند. با دستورهای
+> داخلی مدیریتش کنید:
+> ```bash
+> wp-backup            # همین حالا یک بکاپ بگیر
+> wp-restore           # فهرست بکاپ‌ها و بازگردانی یکی (یا: wp-restore <timestamp>)
+> ```
+- **یک نسخه‌ی خارج از سرور** اضافه کنید — تنها کاری که بکاپ داخلی انجام نمی‌دهد.
+  بکاپ روی همان سرور در برابر خرابی دیسک دوام نمی‌آورد. با `rclone` پوشه‌ی
+  `/root/backups` را روی فضای ابری همگام کنید:
   ```bash
-  mysqldump -u root DBNAME > /root/backup-$(date +%F).sql
+  sudo apt install -y rclone && rclone config   # یک‌بار یک remote تنظیم کنید
+  # سپس روزانه:  rclone copy /root/backups remote:wp-backups
   ```
-- حداقل یک نسخه را **خارج از سرور** نگه دارید. پشتیبانی که بتوانید بازگردانید،
-  آخرین خط دفاع شما در برابر باج‌افزار و بروزرسانی‌های خراب است.
+- جایگزین افزونه‌ای: *UpdraftPlus* مستقیم روی فضای ابری بکاپ می‌گیرد.
+- پشتیبانی که بتوانید بازگردانید، آخرین خط دفاع شما در برابر باج‌افزار و
+  بروزرسانی‌های خراب است — گاهی یک بازگردانی را تست کنید.
 
 ## ج. اگر پشت CDN هستید (آروان‌کلود / کلودفلر / هاست‌های ایران)
 

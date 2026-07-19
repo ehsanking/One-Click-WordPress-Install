@@ -47,6 +47,11 @@ automated, with a random database/user/password generated for you.
   port is auto-detected so you're never locked out), **Fail2ban**, **automatic
   security updates**, and Nginx rules that protect `wp-config.php` and block
   PHP execution inside `wp-content/uploads/`
+- 💾 **Automatic daily backups** of the database + files to `/root/backups`
+  (last 7 kept, rotated) with dead-simple **`wp-backup`** and **`wp-restore`**
+  commands — the safety net a VPS doesn't give you out of the box
+- ⚡ **Speed pack**: **Redis** object cache, **OPcache** tuning and Nginx
+  **gzip** compression, so the site is noticeably faster than shared hosting
 
 ---
 
@@ -231,6 +236,11 @@ services and is intended for new VPS/cloud instances.
   تشخیص داده می‌شود تا دسترسی‌تان قطع نشود)، **Fail2ban**، **بروزرسانی امنیتی
   خودکار**، و قوانین Nginx برای محافظت از `wp-config.php` و جلوگیری از اجرای PHP
   در `wp-content/uploads/`
+- 💾 **بکاپ روزانه‌ی خودکار** از دیتابیس + فایل‌ها در `/root/backups` (۷ نسخه‌ی
+  آخر، با چرخش) و دستورهای بسیار ساده‌ی **`wp-backup`** و **`wp-restore`** —
+  همان تور نجاتی که VPS به‌صورت پیش‌فرض ندارد
+- ⚡ **بسته‌ی سرعت**: **Redis** object cache، تنظیم **OPcache** و فشرده‌سازی
+  **gzip** در Nginx تا سایت محسوساً از هاست اشتراکی سریع‌تر باشد
 
 ## ✅ پیش‌نیازها
 
