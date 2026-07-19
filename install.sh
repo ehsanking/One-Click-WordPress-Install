@@ -15,8 +15,12 @@
 #   - Install MariaDB and auto-create a random database, user and password
 #   - Download & install the correct ionCube Loader and wire it into php.ini
 #   - Tune php.ini  (upload 100M, memory_limit 1024M)
-#   - Download WordPress so the user can finish the famous web installer
-#     (picking the language) using the database credentials we print.
+#   - Enable security hardening (UFW firewall, Fail2ban, auto security updates)
+#   - Either: download WordPress so the user finishes the famous web installer
+#     (picking the language) using the database credentials we print,
+#     OR: MIGRATE an existing site from a cPanel / DirectAdmin backup (or a
+#     files-archive + .sql dump) — extract, import the DB into the fresh
+#     database, re-point wp-config.php, and search-replace the old URL.
 #
 # Usage (one line):
 #   bash <(curl -fsSL https://raw.githubusercontent.com/ehsanking/One-Click-WordPress-Install/main/install.sh)
@@ -52,6 +56,9 @@ DB_NAME=""
 DB_USER=""
 DB_PASS=""
 WEBROOT=""
+INSTALL_MODE="fresh"   # "fresh" = new install, "migrate" = restore a backup
+BACKUP_SRC=""          # URL or local path to a cPanel/DirectAdmin/zip backup
+WP_PREFIX="wp_"        # table prefix (detected from the backup in migrate mode)
 
 # ---------------------------------------------------------------------------
 # Pretty logging
@@ -179,6 +186,27 @@ collect_input() {
         warn "Invalid email. / ایمیل نامعتبر است."
       done
     fi
+  fi
+
+  # --- Fresh install or migrate an existing site? -----------------------
+  echo
+  log "Start FRESH, or MIGRATE an existing site from a cPanel / DirectAdmin"
+  log "backup (or a .zip/.tar.gz of the files plus a .sql dump)?"
+  log "نصب تازه یا مهاجرت از بکاپ cPanel/DirectAdmin (یا zip فایل‌ها + فایل sql)؟"
+  if ask_yn "Migrate from an existing backup? / از بکاپ موجود مهاجرت شود؟" "n"; then
+    INSTALL_MODE="migrate"
+    log "Give a direct download URL, or upload the backup to the server first"
+    log "(e.g. with scp) and give its path."
+    log "یک لینک دانلود مستقیم بدهید، یا بکاپ را اول روی سرور بگذارید و مسیرش را بدهید."
+    while true; do
+      BACKUP_SRC="$(ask 'Backup URL or file path / لینک یا مسیر فایل بکاپ')"
+      if [[ "${BACKUP_SRC}" =~ ^https?:// ]] || [[ -f "${BACKUP_SRC}" ]]; then
+        break
+      fi
+      warn "Enter a valid http(s) URL or an existing file path."
+      warn "یک لینک http(s) یا مسیر فایل موجود وارد کنید."
+    done
+    ok "Migration mode from: ${BACKUP_SRC}"
   fi
 }
 
@@ -441,27 +469,171 @@ tune_php() {
   ok "php.ini tuned (upload 100M, memory_limit 1024M)."
 }
 
-download_wordpress() {
-  step "8/9  Downloading WordPress / دانلود وردپرس"
-  WEBROOT="/var/www/${DOMAIN}"
-
-  # Install WP-CLI (handy for download and future maintenance).
+# Install WP-CLI once (used for fresh downloads, migration and maintenance).
+ensure_wp_cli() {
   if ! command -v wp >/dev/null; then
     curl -fsSL https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar \
       -o /usr/local/bin/wp
     chmod +x /usr/local/bin/wp
   fi
+}
+
+# Apply the standard WordPress ownership/permissions to the web root.
+fix_webroot_perms() {
+  chown -R www-data:www-data "${WEBROOT}"
+  find "${WEBROOT}" -type d -exec chmod 755 {} \;
+  find "${WEBROOT}" -type f -exec chmod 644 {} \;
+  [[ -f "${WEBROOT}/wp-config.php" ]] && chmod 640 "${WEBROOT}/wp-config.php"
+}
+
+download_wordpress() {
+  step "8/9  Downloading WordPress / دانلود وردپرس"
+  WEBROOT="/var/www/${DOMAIN}"
+  ensure_wp_cli
 
   mkdir -p "${WEBROOT}"
   # Download the latest WordPress core. The language is chosen by the user
   # later, on the first screen of the web installer.
   wp core download --path="${WEBROOT}" --allow-root --force
 
-  # Permissions: web server owns the files; dirs 755, files 644.
-  chown -R www-data:www-data "${WEBROOT}"
-  find "${WEBROOT}" -type d -exec chmod 755 {} \;
-  find "${WEBROOT}" -type f -exec chmod 644 {} \;
+  fix_webroot_perms
   ok "WordPress downloaded to ${WEBROOT}"
+}
+
+# Migrate an existing site from a cPanel / DirectAdmin backup (or a plain
+# files-archive + .sql dump). The archive is unpacked, the WordPress files and
+# the database dump are located automatically wherever they sit inside the
+# backup, the dump is imported into the fresh random database, wp-config.php is
+# re-pointed at the new credentials, and every occurrence of the old site URL
+# is rewritten to the new domain with `wp search-replace`.
+migrate_from_backup() {
+  step "8/9  Restoring from backup / بازگردانی از بکاپ"
+  WEBROOT="/var/www/${DOMAIN}"
+  ensure_wp_cli
+
+  local work src xdir wp_root sql_file
+  work="$(mktemp -d -p /var/tmp wpmig.XXXXXX)"
+  xdir="${work}/extracted"
+  mkdir -p "${xdir}"
+
+  # 1) Obtain the archive (download it, or use a local path).
+  if [[ "${BACKUP_SRC}" =~ ^https?:// ]]; then
+    log "Downloading backup ..."
+    wget -q --show-progress "${BACKUP_SRC}" -O "${work}/backup" \
+      || { err "Failed to download the backup from ${BACKUP_SRC}"; exit 1; }
+    src="${work}/backup"
+  else
+    src="${BACKUP_SRC}"
+  fi
+
+  # 2) Extract (tar.gz / tgz / tar / zip; fall back by trying both).
+  log "Extracting the backup ..."
+  case "${src}" in
+    *.zip)              unzip -q -o "${src}" -d "${xdir}" ;;
+    *.tar.gz|*.tgz)     tar -xzf "${src}" -C "${xdir}" ;;
+    *.tar)              tar -xf  "${src}" -C "${xdir}" ;;
+    *) tar -xzf "${src}" -C "${xdir}" 2>/dev/null \
+         || unzip -q -o "${src}" -d "${xdir}" 2>/dev/null \
+         || { err "Unknown archive format: ${src}"; exit 1; } ;;
+  esac
+
+  # 3) Locate the WordPress root anywhere in the tree (wp-load.php lives there).
+  #    Works for cPanel (homedir/public_html) and DirectAdmin (domains/<d>/public_html).
+  local wp_load
+  wp_load="$(find "${xdir}" -type f -name wp-load.php 2>/dev/null | head -n1 || true)"
+  if [[ -z "${wp_load}" ]]; then
+    err "No WordPress installation found inside the backup (wp-load.php missing)."
+    err "داخل بکاپ نصب وردپرسی پیدا نشد."
+    rm -rf "${work}"; exit 1
+  fi
+  wp_root="$(dirname "${wp_load}")"
+  ok "Found WordPress files at: ${wp_root#${xdir}/}"
+
+  # 4) Locate a database dump that contains WordPress tables.
+  #    cPanel: mysql/<db>.sql   |   DirectAdmin: backup/<user>_<db>.sql[.gz]
+  local f
+  while IFS= read -r f; do
+    # Read via process substitution so grep's early exit can't SIGPIPE-fail
+    # the pipeline under `set -o pipefail`.
+    if [[ "${f}" == *.gz ]]; then
+      grep -qiE '(CREATE TABLE|INSERT INTO)[^;]*options' < <(zcat "${f}" 2>/dev/null) \
+        && { sql_file="${f}"; break; }
+    else
+      grep -qiE '(CREATE TABLE|INSERT INTO)[^;]*options' "${f}" \
+        && { sql_file="${f}"; break; }
+    fi
+  done < <(find "${xdir}" -type f \( -iname '*.sql' -o -iname '*.sql.gz' \) 2>/dev/null)
+
+  if [[ -z "${sql_file:-}" ]]; then
+    err "No WordPress database dump (*.sql) was found inside the backup."
+    err "فایل دیتابیس (*.sql) داخل بکاپ پیدا نشد."
+    rm -rf "${work}"; exit 1
+  fi
+  ok "Found database dump at: ${sql_file#${xdir}/}"
+
+  # 5) Move the files into the web root.
+  log "Copying site files into ${WEBROOT} ..."
+  mkdir -p "${WEBROOT}"
+  cp -a "${wp_root}/." "${WEBROOT}/"
+
+  # 6) Import the dump into the fresh random database (as root, via socket).
+  #    Strip any USE/CREATE DATABASE lines so it always lands in our DB.
+  log "Importing the database ..."
+  if [[ "${sql_file}" == *.gz ]]; then
+    zcat "${sql_file}" | sed '/^\s*USE\s/Id; /^\s*CREATE DATABASE/Id' \
+      | mysql --max_allowed_packet=512M "${DB_NAME}"
+  else
+    sed '/^\s*USE\s/Id; /^\s*CREATE DATABASE/Id' "${sql_file}" \
+      | mysql --max_allowed_packet=512M "${DB_NAME}"
+  fi
+  ok "Database imported."
+
+  # 7) Point wp-config.php at the NEW database credentials (keep everything
+  #    else: salts, table prefix, custom constants). Create one if missing.
+  if [[ -f "${WEBROOT}/wp-config.php" ]]; then
+    wp config set DB_NAME     "${DB_NAME}" --path="${WEBROOT}" --allow-root --quiet
+    wp config set DB_USER     "${DB_USER}" --path="${WEBROOT}" --allow-root --quiet
+    wp config set DB_PASSWORD "${DB_PASS}" --path="${WEBROOT}" --allow-root --quiet
+    wp config set DB_HOST     "localhost"  --path="${WEBROOT}" --allow-root --quiet
+  else
+    # Detect the table prefix from the dump (e.g. wp_ from wp_options).
+    # Trailing `|| true` keeps a SIGPIPE from `head` (with pipefail) from
+    # aborting the script during this assignment.
+    local pref
+    pref="$( { [[ "${sql_file}" == *.gz ]] && zcat "${sql_file}" || cat "${sql_file}"; } 2>/dev/null \
+      | grep -oiE 'CREATE TABLE `?[a-z0-9_]+options`?' | head -n1 \
+      | grep -oiE '[a-z0-9_]+options' | head -n1 \
+      | sed -E 's/options$//I' || true )"
+    [[ -z "${pref}" ]] && pref="wp_"
+    wp config create --path="${WEBROOT}" --allow-root --force \
+      --dbname="${DB_NAME}" --dbuser="${DB_USER}" \
+      --dbpass="${DB_PASS}" --dbhost="localhost" --dbprefix="${pref}"
+  fi
+  WP_PREFIX="$(wp config get table_prefix --path="${WEBROOT}" --allow-root 2>/dev/null || echo 'wp_')"
+
+  fix_webroot_perms   # wp-config exists now, so it gets chmod 640
+
+  # 8) Rewrite the old site URL to the new domain across all tables.
+  local new_url old_url old_host
+  new_url="http://${DOMAIN}"; [[ "${INSTALL_SSL}" == "yes" ]] && new_url="https://${DOMAIN}"
+  old_url="$(wp option get siteurl --path="${WEBROOT}" --allow-root 2>/dev/null || true)"
+  if [[ -n "${old_url}" && "${old_url}" != "${new_url}" ]]; then
+    log "Rewriting URLs: ${old_url}  ->  ${new_url}"
+    wp search-replace "${old_url}" "${new_url}" \
+      --all-tables --skip-columns=guid --path="${WEBROOT}" --allow-root --quiet || true
+    # Also swap the bare hostname (covers hard-coded, scheme-less references).
+    old_host="${old_url#*://}"; old_host="${old_host%%/*}"
+    if [[ -n "${old_host}" && "${old_host}" != "${DOMAIN}" ]]; then
+      wp search-replace "${old_host}" "${DOMAIN}" \
+        --all-tables --skip-columns=guid --path="${WEBROOT}" --allow-root --quiet || true
+    fi
+    wp option update home "${new_url}" --path="${WEBROOT}" --allow-root --quiet || true
+    wp option update siteurl "${new_url}" --path="${WEBROOT}" --allow-root --quiet || true
+  fi
+
+  wp cache flush --path="${WEBROOT}" --allow-root --quiet 2>/dev/null || true
+  rm -rf "${work}"
+  ok "Site restored to ${WEBROOT} (prefix: ${WP_PREFIX})."
 }
 
 configure_nginx_site() {
@@ -578,22 +750,43 @@ save_credentials() {
   [[ "${INSTALL_SSL}" == "yes" ]] && scheme="https"
 
   umask 077
-  cat > "${CRED_FILE}" <<-EOF
-		==================== WordPress Install ====================
-		Date            : $(date)
-		Site URL        : ${scheme}://${DOMAIN}
-		Install page    : ${scheme}://${DOMAIN}/wp-admin/install.php
-		Admin panel     : ${scheme}://${DOMAIN}/wp-admin
-		Web root        : ${WEBROOT}
+  if [[ "${INSTALL_MODE}" == "migrate" ]]; then
+    cat > "${CRED_FILE}" <<-EOF
+			=============== WordPress Migration (restored) ===============
+			Date            : $(date)
+			Site URL        : ${scheme}://${DOMAIN}
+			Admin panel     : ${scheme}://${DOMAIN}/wp-admin
+			Web root        : ${WEBROOT}
 
-		--- Database (enter these in the WordPress web installer) ---
-		Database name   : ${DB_NAME}
-		Username        : ${DB_USER}
-		Password        : ${DB_PASS}
-		Database host   : localhost
-		Table prefix    : wp_
-		===========================================================
-	EOF
+			Log in with the SAME username/password as on your old host.
+			با همان یوزر/رمز مدیریت سایت قبلی وارد شوید.
+
+			--- New database connection (already written to wp-config.php) ---
+			Database name   : ${DB_NAME}
+			Username        : ${DB_USER}
+			Password        : ${DB_PASS}
+			Database host   : localhost
+			Table prefix    : ${WP_PREFIX}
+			=============================================================
+		EOF
+  else
+    cat > "${CRED_FILE}" <<-EOF
+			==================== WordPress Install ====================
+			Date            : $(date)
+			Site URL        : ${scheme}://${DOMAIN}
+			Install page    : ${scheme}://${DOMAIN}/wp-admin/install.php
+			Admin panel     : ${scheme}://${DOMAIN}/wp-admin
+			Web root        : ${WEBROOT}
+
+			--- Database (enter these in the WordPress web installer) ---
+			Database name   : ${DB_NAME}
+			Username        : ${DB_USER}
+			Password        : ${DB_PASS}
+			Database host   : localhost
+			Table prefix    : wp_
+			===========================================================
+		EOF
+  fi
   chmod 600 "${CRED_FILE}"
 }
 
@@ -607,26 +800,39 @@ print_summary() {
   printf '%s\n' "${C_GREEN}  Installation complete!  /  نصب با موفقیت انجام شد!${C_RESET}"
   printf '%s\n\n' "${C_GREEN}=================================================================${C_RESET}"
 
-  printf '%s\n' "${C_GREEN}─────────────────────────────────────────────────────────────────${C_RESET}"
-  printf '%s\n' "  👉  Open this address in your browser to install WordPress:"
-  printf '%s\n\n' "  👉  این آدرس را در مرورگر باز کنید تا وردپرس نصب شود:"
-  printf '        %s\n' "${C_CYAN}${url}/wp-admin/install.php${C_RESET}"
-  printf '%s\n' "${C_GREEN}─────────────────────────────────────────────────────────────────${C_RESET}"
-  printf '\n%s\n' "(You can also just open ${C_CYAN}${url}${C_RESET} — it redirects to the installer.)"
-  printf '%s\n\n' "(می‌توانید ${C_CYAN}${url}${C_RESET} را هم باز کنید؛ خودش به صفحه‌ی نصب می‌رود.)"
+  if [[ "${INSTALL_MODE}" == "migrate" ]]; then
+    printf '%s\n' "${C_GREEN}─────────────────────────────────────────────────────────────────${C_RESET}"
+    printf '%s\n' "  👉  Your migrated site is live at:"
+    printf '%s\n\n' "  👉  سایت منتقل‌شده‌ی شما اینجا بالا آمده است:"
+    printf '        %s\n' "${C_CYAN}${url}${C_RESET}"
+    printf '        %s\n' "admin: ${C_CYAN}${url}/wp-admin${C_RESET}"
+    printf '%s\n' "${C_GREEN}─────────────────────────────────────────────────────────────────${C_RESET}"
+    printf '\n%s\n' "Log in with the SAME username/password you used on your old host."
+    printf '%s\n\n' "با همان یوزر و رمز مدیریت سایت قبلی‌تان وارد شوید."
+    printf '%s\n' "The new database connection is already written to wp-config.php."
+    printf '%s\n\n' "اتصال دیتابیس جدید از قبل در wp-config.php تنظیم شده است."
+  else
+    printf '%s\n' "${C_GREEN}─────────────────────────────────────────────────────────────────${C_RESET}"
+    printf '%s\n' "  👉  Open this address in your browser to install WordPress:"
+    printf '%s\n\n' "  👉  این آدرس را در مرورگر باز کنید تا وردپرس نصب شود:"
+    printf '        %s\n' "${C_CYAN}${url}/wp-admin/install.php${C_RESET}"
+    printf '%s\n' "${C_GREEN}─────────────────────────────────────────────────────────────────${C_RESET}"
+    printf '\n%s\n' "(You can also just open ${C_CYAN}${url}${C_RESET} — it redirects to the installer.)"
+    printf '%s\n\n' "(می‌توانید ${C_CYAN}${url}${C_RESET} را هم باز کنید؛ خودش به صفحه‌ی نصب می‌رود.)"
 
-  printf '%s\n' "On the first screen choose your LANGUAGE, then enter these DB details:"
-  printf '%s\n\n' "در صفحه‌ی اول زبان را انتخاب کنید، سپس اطلاعات دیتابیس زیر را وارد کنید:"
-  printf '    %-16s %s\n' "Database name:" "${DB_NAME}"
-  printf '    %-16s %s\n' "Username:"      "${DB_USER}"
-  printf '    %-16s %s\n' "Password:"      "${DB_PASS}"
-  printf '    %-16s %s\n' "Database host:" "localhost"
-  printf '    %-16s %s\n\n' "Table prefix:" "wp_"
+    printf '%s\n' "On the first screen choose your LANGUAGE, then enter these DB details:"
+    printf '%s\n\n' "در صفحه‌ی اول زبان را انتخاب کنید، سپس اطلاعات دیتابیس زیر را وارد کنید:"
+    printf '    %-16s %s\n' "Database name:" "${DB_NAME}"
+    printf '    %-16s %s\n' "Username:"      "${DB_USER}"
+    printf '    %-16s %s\n' "Password:"      "${DB_PASS}"
+    printf '    %-16s %s\n' "Database host:" "localhost"
+    printf '    %-16s %s\n\n' "Table prefix:" "wp_"
 
-  printf '%s\n' "After finishing, your admin panel will be at: ${C_CYAN}${url}/wp-admin${C_RESET}"
-  printf '%s\n\n' "بعد از پایان، پنل مدیریت شما اینجاست: ${C_CYAN}${url}/wp-admin${C_RESET}"
+    printf '%s\n' "After finishing, your admin panel will be at: ${C_CYAN}${url}/wp-admin${C_RESET}"
+    printf '%s\n\n' "بعد از پایان، پنل مدیریت شما اینجاست: ${C_CYAN}${url}/wp-admin${C_RESET}"
+  fi
 
-  printf '%s\n' "${C_YELLOW}These credentials are also saved (root-only) to: ${CRED_FILE}${C_RESET}"
+  printf '%s\n' "${C_YELLOW}Details are also saved (root-only) to: ${CRED_FILE}${C_RESET}"
   printf '%s\n' "${C_YELLOW}این اطلاعات در فایل بالا هم ذخیره شده است (فقط برای root).${C_RESET}"
 
   printf '\n%s\n' "Security enabled: UFW firewall, Fail2ban, automatic security updates."
@@ -659,7 +865,11 @@ main() {
   install_database
   install_ioncube
   tune_php
-  download_wordpress
+  if [[ "${INSTALL_MODE}" == "migrate" ]]; then
+    migrate_from_backup
+  else
+    download_wordpress
+  fi
   configure_nginx_site
   harden_system
   save_credentials

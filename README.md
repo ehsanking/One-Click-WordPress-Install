@@ -37,6 +37,11 @@ automated, with a random database/user/password generated for you.
 - 📥 Downloads **WordPress** so you finish the famous web installer and pick
   the **language** yourself (the DB credentials are printed for you to enter),
   and prints the **exact install URL** so you don't get lost
+- 🚚 **…or MIGRATE an existing site** from a **cPanel / DirectAdmin backup**
+  (or a files archive + `.sql` dump): the script finds `public_html` and the
+  database inside the backup, imports it, re-points `wp-config.php` to the new
+  DB, and rewrites the old site URL to your new domain automatically — see the
+  **[migration guide](docs/MIGRATE.md)**
 - 🛟 Creates a 2GB swap file automatically if the server has less than 1GB RAM
 - 🔥 **Security hardening, turned on automatically**: UFW firewall (your SSH
   port is auto-detected so you're never locked out), **Fail2ban**, **automatic
@@ -120,6 +125,8 @@ The same credentials are also saved, readable by **root only**, at:
 
 ## 📚 Guides
 
+- **[Migrating from shared hosting](docs/MIGRATE.md)** — move a live site from
+  a cPanel / DirectAdmin backup onto your new VPS, step by step.
 - **[Installing WordPress — step by step](docs/INSTALL-WORDPRESS.md)** — how to
   finish the browser-based web installer, plus useful WP-CLI commands and
   troubleshooting.
@@ -215,6 +222,10 @@ services and is intended for new VPS/cloud instances.
 - 📥 دانلود **وردپرس** تا خودتان نصب وب را کامل کنید و **زبان** را انتخاب کنید
   (اطلاعات دیتابیس برای واردکردن نمایش داده می‌شود) و نمایش **آدرس دقیق نصب** تا
   گیج نشوید
+- 🚚 **…یا مهاجرت یک سایت موجود** از **بکاپ cPanel / DirectAdmin** (یا آرشیو
+  فایل‌ها + فایل `.sql`): اسکریپت `public_html` و دیتابیس را داخل بکاپ پیدا
+  می‌کند، ایمپورت می‌کند، `wp-config.php` را به دیتابیس جدید وصل می‌کند و آدرس
+  دامنه‌ی قدیمی را خودکار با دامنه‌ی جدید جایگزین می‌کند — **[راهنمای مهاجرت](docs/MIGRATE.md)**
 - 🛟 ساخت خودکار فایل swap دو گیگابایتی اگر رم سرور کمتر از ۱ گیگ باشد
 - 🔥 **سخت‌سازی امنیتی، به‌صورت خودکار فعال می‌شود**: فایروال UFW (پورت SSH شما
   تشخیص داده می‌شود تا دسترسی‌تان قطع نشود)، **Fail2ban**، **بروزرسانی امنیتی
@@ -290,6 +301,8 @@ bash <(wget -qO- https://raw.githubusercontent.com/ehsanking/One-Click-WordPress
 
 ## 📚 راهنماها
 
+- **[مهاجرت از هاست اشتراکی](docs/MIGRATE.md)** — انتقال یک سایت زنده از بکاپ
+  cPanel / DirectAdmin به VPS جدید، مرحله‌به‌مرحله.
 - **[نصب وردپرس — مرحله‌به‌مرحله](docs/INSTALL-WORDPRESS.md)** — تکمیل نصب
   وردپرس در مرورگر، به‌همراه دستورهای مفید WP-CLI و رفع اشکال.
 - **[راهنمای امنیت](docs/SECURITY.md)** — سخت‌سازی سرور و وردپرس: SSH،
