@@ -159,7 +159,13 @@ wpctl password           # reset an admin password or create an admin
 wpctl flush              # flush object + OPcache
 wpctl maintenance on|off # maintenance mode
 wpctl logs               # recent Nginx / PHP-FPM errors
+wpctl email              # set up outgoing email via an SMTP relay
 ```
+
+> **Outgoing email:** a fresh VPS can't reliably send mail, so WordPress emails
+> (password resets, notifications) fail silently. Run **`wpctl email`**, enter
+> your SMTP relay details (your provider, Gmail app password, Brevo, SendGrid,
+> Mailgun, SES…) and it configures the system mailer (`msmtp`) + sends a test.
 
 ---
 
@@ -360,7 +366,13 @@ wpctl password           # تغییر رمز مدیر یا ساخت کاربر �
 wpctl flush              # پاک‌کردن object cache و OPcache
 wpctl maintenance on|off # حالت تعمیر
 wpctl logs               # خطاهای اخیر Nginx / PHP-FPM
+wpctl email              # تنظیم ایمیل خروجی از طریق SMTP
 ```
+
+> **ایمیل خروجی:** یک VPS تازه نمی‌تواند مطمئن ایمیل بفرستد، پس ایمیل‌های وردپرس
+> (بازیابی رمز، اعلان‌ها) بی‌صدا شکست می‌خورند. **`wpctl email`** را بزنید،
+> اطلاعات SMTP خود را وارد کنید (سرویس‌دهنده‌تان، App Password جیمیل، Brevo،
+> SendGrid، Mailgun، SES…) تا میل‌سرور سیستم (`msmtp`) تنظیم و یک ایمیل تست ارسال شود.
 
 ## 🧩 اجزای نصب‌شده
 
