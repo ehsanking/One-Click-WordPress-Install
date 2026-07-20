@@ -17,7 +17,8 @@
 #   - Tune php.ini  (upload 100M, memory_limit 1024M)
 #   - Speed pack: Redis object cache, OPcache tuning, Nginx gzip
 #   - Automatic daily backups (wp-backup / wp-restore, kept in /root/backups)
-#   - A friendly management menu: `wpctl` (status, backup, update, SSL, …)
+#   - A friendly management menu: `wpctl` (status, backup, update, SSL, email…)
+#   - Optional outgoing email via an SMTP relay (msmtp) so WordPress mail works
 #   - Enable security hardening (UFW firewall, Fail2ban, auto security updates)
 #   - Either: download WordPress so the user finishes the famous web installer
 #     (picking the language) using the database credentials we print,
@@ -62,6 +63,7 @@ WEBROOT=""
 INSTALL_MODE="fresh"   # "fresh" = new install, "migrate" = restore a backup
 BACKUP_SRC=""          # URL or local path to a cPanel/DirectAdmin/zip backup
 WP_PREFIX="wp_"        # table prefix (detected from the backup in migrate mode)
+SETUP_EMAIL="no"       # "yes" = configure outgoing SMTP email at the end
 
 # ---------------------------------------------------------------------------
 # Pretty logging
@@ -210,6 +212,16 @@ collect_input() {
       warn "یک لینک http(s) یا مسیر فایل موجود وارد کنید."
     done
     ok "Migration mode from: ${BACKUP_SRC}"
+  fi
+
+  # --- Outgoing email (SMTP) --------------------------------------------
+  echo
+  log "A fresh VPS can't reliably send email, so WordPress mail (password"
+  log "resets, notifications) needs an SMTP relay. You can set this up now"
+  log "(you'll need SMTP details) or later anytime with 'wpctl email'."
+  log "برای کارکردن ایمیل وردپرس، رله‌ی SMTP لازم است — الان یا بعداً با wpctl email."
+  if ask_yn "Set up outgoing email now? / الان ایمیل خروجی تنظیم شود؟" "n"; then
+    SETUP_EMAIL="yes"
   fi
 }
 
@@ -1051,6 +1063,65 @@ do_logs(){
   tail -n 20 "/var/log/php${PHP_VERSION}-fpm.log" 2>/dev/null || echo "(none)"
 }
 
+do_email(){
+  need_root
+  echo "${C_C}== Outgoing email (SMTP) ==${C_R}"
+  echo "A VPS can't reliably send mail on its own, so WordPress email (password"
+  echo "resets, notifications) needs an SMTP relay. Enter your SMTP details —"
+  echo "from your email/hosting provider, or Gmail app password, Brevo,"
+  echo "SendGrid, Mailgun, Amazon SES, etc."
+  echo "برای کارکردن ایمیل وردپرس، اطلاعات SMTP خود را وارد کنید."
+  local host port user pass from fromname starttls to sapi ini
+  printf 'SMTP host (e.g. smtp.gmail.com): '; read -r host </dev/tty || true
+  [[ -z "$host" ]] && { echo "Cancelled."; return; }
+  printf 'SMTP port [587]: '; read -r port </dev/tty || true; port="${port:-587}"
+  printf 'SMTP username: '; read -r user </dev/tty || true
+  printf 'SMTP password: '; read -rs pass </dev/tty || true; echo
+  printf 'From address [wordpress@%s]: ' "$DOMAIN"; read -r from </dev/tty || true; from="${from:-wordpress@$DOMAIN}"
+  printf 'From name [%s]: ' "$DOMAIN"; read -r fromname </dev/tty || true; fromname="${fromname:-$DOMAIN}"
+
+  if ! apt-get install -y msmtp msmtp-mta ca-certificates >/dev/null 2>&1; then
+    echo "${C_RED}Failed to install msmtp.${C_R}"; return
+  fi
+  starttls="on"; [[ "$port" == "465" ]] && starttls="off"
+
+  umask 077
+  printf '%s\n' \
+    "# Managed by wpctl" "defaults" "auth on" "tls on" \
+    "tls_trust_file /etc/ssl/certs/ca-certificates.crt" "logfile /var/log/msmtp.log" \
+    "" "account wordpress" "host $host" "port $port" "tls_starttls $starttls" \
+    "from $from" "user $user" "password $pass" "" "account default : wordpress" \
+    > /etc/msmtprc
+  chmod 600 /etc/msmtprc
+
+  for sapi in fpm cli; do
+    ini="/etc/php/${PHP_VERSION}/${sapi}/conf.d/97-mail.ini"
+    printf 'sendmail_path = "/usr/bin/msmtp -t"\n' > "$ini"
+  done
+  systemctl restart "php${PHP_VERSION}-fpm" >/dev/null 2>&1 || true
+
+  # Make WordPress send with the same From, so headers match the relay sender.
+  if have_wp; then
+    local mud="$WEBROOT/wp-content/mu-plugins"
+    mkdir -p "$mud"
+    printf '%s\n' \
+      '<?php' \
+      "add_filter('wp_mail_from', function(\$e){ return '$from'; });" \
+      "add_filter('wp_mail_from_name', function(\$n){ return '$fromname'; });" \
+      > "$mud/oneclick-mail-from.php"
+    chown -R www-data:www-data "$mud"
+  fi
+
+  echo "${C_G}SMTP configured.${C_R}"
+  printf 'Send a test email to (blank = %s): ' "$from"; read -r to </dev/tty || true; to="${to:-$from}"
+  if printf 'To: %s\nFrom: %s <%s>\nSubject: wpctl test email\n\nOutgoing email works. ارسال ایمیل کار می‌کند.\n' \
+       "$to" "$fromname" "$from" | msmtp "$to"; then
+    echo "${C_G}Test email sent to $to — check inbox/spam.${C_R}"
+  else
+    echo "${C_RED}Test failed. See /var/log/msmtp.log${C_R}"
+  fi
+}
+
 menu(){
   while true; do
     printf '\n%s── wpctl — %s ──%s\n' "$C_C" "$DOMAIN" "$C_R"
@@ -1066,12 +1137,13 @@ menu(){
       "  9) Flush caches           پاک‌کردن کش" \
       " 10) Maintenance mode       حالت تعمیر" \
       " 11) View error logs        مشاهده لاگ‌ها" \
+      " 12) Set up email (SMTP)    تنظیم ایمیل خروجی" \
       "  0) Quit                   خروج"
     printf '%sChoose:%s ' "$C_Y" "$C_R"; read -r c </dev/tty || break
     case "$c" in
       1) status;; 2) wp-backup;; 3) wp-restore;; 4) do_update;; 5) do_info;;
       6) do_ssl;; 7) do_upload;; 8) do_password;; 9) do_flush;;
-      10) do_maint;; 11) do_logs;; 0|q|Q) exit 0;;
+      10) do_maint;; 11) do_logs;; 12) do_email;; 0|q|Q) exit 0;;
       *) echo "Invalid choice.";;
     esac
     pause
@@ -1091,9 +1163,10 @@ case "${1:-menu}" in
   flush)       do_flush;;
   maintenance) shift; do_maint "$@";;
   logs)        do_logs;;
+  email)       do_email;;
   -h|--help|help)
     echo "wpctl — manage your WordPress server"
-    echo "Usage: wpctl [status|backup|restore|update|info|ssl|upload <size>|password|flush|maintenance <on|off>|logs]"
+    echo "Usage: wpctl [status|backup|restore|update|info|ssl|upload <size>|password|flush|maintenance <on|off>|logs|email]"
     echo "Run 'wpctl' with no arguments for the interactive menu.";;
   *) echo "Unknown command: $1 (try: wpctl help)"; exit 1;;
 esac
@@ -1204,6 +1277,10 @@ print_summary() {
   printf '%s\n' "Speed pack: Redis + OPcache + gzip enabled."
   printf '%s\n' "Manage everything with one simple menu — just run: ${C_CYAN}wpctl${C_RESET}"
   printf '%s\n' "همه‌چیز را با یک منوی ساده مدیریت کنید — کافیست بزنید: ${C_CYAN}wpctl${C_RESET}"
+  if [[ ! -f /etc/msmtprc ]]; then
+    printf '%s\n' "${C_YELLOW}Email isn't set up yet — run ${C_CYAN}wpctl email${C_YELLOW} so WordPress can send mail (password resets…).${C_RESET}"
+    printf '%s\n' "${C_YELLOW}ایمیل هنوز تنظیم نشده — ${C_CYAN}wpctl email${C_YELLOW} را بزنید تا ایمیل‌های وردپرس کار کند.${C_RESET}"
+  fi
   if [[ "${INSTALL_MODE}" != "migrate" ]]; then
     printf '%s\n' "${C_YELLOW}Tip: after finishing setup, install the 'Redis Object Cache' plugin and click Enable for faster DB caching.${C_RESET}"
     printf '%s\n' "${C_YELLOW}نکته: بعد از نصب، افزونه‌ی 'Redis Object Cache' را نصب و فعال کنید تا کش دیتابیس سریع‌تر شود.${C_RESET}"
@@ -1246,6 +1323,9 @@ main() {
   harden_system
   setup_backups
   install_wpctl
+  if [[ "${SETUP_EMAIL}" == "yes" ]]; then
+    /usr/local/bin/wpctl email || warn "Email setup did not complete; run 'wpctl email' later."
+  fi
   save_credentials
   print_summary
 }
